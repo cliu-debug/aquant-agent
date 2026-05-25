@@ -1,0 +1,144 @@
+# AStockAgents 配置文件
+# 复制此文件为 config.yaml 并填入你的配置
+
+# ==================== LLM 配置 ====================
+llm:
+  # 默认使用的LLM提供商
+  default_provider: openai
+  
+  # OpenAI 配置
+  openai:
+    api_key: your-openai-api-key
+    base_url: https://api.openai.com/v1  # 可选，用于自定义API端点
+    model: gpt-4
+    temperature: 0.3
+    max_tokens: 4096
+  
+  # Anthropic 配置
+  anthropic:
+    api_key: your-anthropic-api-key
+    model: claude-3-sonnet-20240229
+    temperature: 0.3
+    max_tokens: 4096
+  
+  # DeepSeek 配置
+  deepseek:
+    api_key: your-deepseek-api-key
+    base_url: https://api.deepseek.com/v1
+    model: deepseek-chat
+    temperature: 0.3
+    max_tokens: 4096
+
+# ==================== 数据源配置 ====================
+data_sources:
+  # mootdx (通达信) - 行情数据
+  mootdx:
+    enabled: true
+    # mootdx 不需要额外配置，本地运行
+  
+  # 腾讯财经 - 实时行情
+  tencent:
+    enabled: true
+    # 腾讯财经是公开API，不需要配置
+  
+  # 同花顺 - 热点/情绪数据
+  tonghuashun:
+    enabled: true
+    # 如需登录功能，配置账号
+    # username: your-username
+    # password: your-password
+  
+  # akshare - 基本面数据
+  akshare:
+    enabled: true
+    # akshare 不需要额外配置
+  
+  # 问财 (iwencai) - 语义搜索
+  iwencai:
+    enabled: true
+    # 需要配置问财API Key
+    # api_key: your-iwencai-api-key
+
+# ==================== 分析配置 ====================
+analysis:
+  # 技术指标配置
+  technical:
+    # 默认分析的时间周期
+    periods:
+      - "daily"    # 日线
+      - "weekly"   # 周线
+    
+    # 技术指标列表
+    indicators:
+      - "ma"       # 移动平均线
+      - "macd"     # MACD
+      - "rsi"      # RSI
+      - "boll"     # 布林带
+      - "kdj"      # KDJ
+      - "volume"   # 成交量
+  
+  # 基本面分析配置
+  fundamental:
+    # 分析的财务报表类型
+    reports:
+      - "balance_sheet"     # 资产负债表
+      - "income_statement"  # 利润表
+      - "cash_flow"         # 现金流量表
+    
+    # 关键财务指标
+    key_metrics:
+      - "roe"          # 净资产收益率
+      - "roa"          # 总资产收益率
+      - "pe"           # 市盈率
+      - "pb"           # 市净率
+      - "debt_ratio"   # 资产负债率
+      - "gross_margin" # 毛利率
+  
+  # 情绪分析配置
+  sentiment:
+    # 热点追踪数量
+    top_n_hot_topics: 20
+    
+    # 情绪评分阈值
+    sentiment_thresholds:
+      bullish: 70    # 看多阈值
+      bearish: 30    # 看空阈值
+
+# ==================== 工作流配置 ====================
+workflow:
+  # 是否启用辩论机制
+  enable_debate: true
+  
+  # 辩论轮数
+  debate_rounds: 2
+  
+  # 是否启用风控
+  enable_risk_management: true
+  
+  # 风控配置
+  risk_config:
+    # 风险等级: conservative, moderate, aggressive
+    risk_level: moderate
+    
+    # 最大仓位建议 (%)
+    max_position_size: 20
+    
+    # 止损比例 (%)
+    stop_loss_pct: 8.0
+
+# ==================== 输出配置 ====================
+output:
+  # 报告语言: zh (中文), en (英文)
+  language: zh
+  
+  # 报告格式: text, markdown, json
+  format: text
+  
+  # 是否保存分析报告
+  save_reports: true
+  
+  # 报告保存路径
+  report_path: ./reports
+  
+  # 日志级别: DEBUG, INFO, WARNING, ERROR
+  log_level: INFO

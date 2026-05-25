@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AStockAgents - 多智能体股票分析系统</title>
+    <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e0e0e0;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        /* Header */
+        .header {
+            text-align: center;
+            padding: 40px 0;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(90deg, #00d4ff, #7b2cbf);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            color: #888;
+            font-size: 1.1rem;
+        }
+        
+        /* Search Box */
+        .search-box {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 30px;
+            margin-bottom: 30px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .search-form {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .search-form input {
+            flex: 1;
+            min-width: 200px;
+            padding: 15px 20px;
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            color: #fff;
+            font-size: 1rem;
+            transition: all 0.3s;
+        }
+        
+        .search-form input:focus {
+            outline: none;
+            border-color: #00d4ff;
+            background: rgba(255, 255, 255, 0.1);
+        }
+        
+        .search-form button {
+            padding: 15px 40px;
+            background: linear-gradient(90deg, #00d4ff, #7b2cbf);
+            border: none;
+            border-radius: 12px;
+            color: #fff;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .search-form button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(0, 212, 255, 0.3);
+        }
+        
+        /* Quick Stocks */
+        .quick-stocks {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 20px;
+        }
+        
+        .quick-stock {
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 0.9rem;
+        }
+        
+        .quick-stock:hover {
+            background: rgba(0, 212, 255, 0.2);
+            border-color: #00d4ff;
+        }
+        
+        /* Loading */
+        .loading {
+            text-align: center;
+            padding: 60px;
+        }
+        
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top-color: #00d4ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Results */
+        .results {
+            display: grid;
+            gap: 20px;
+        }
+        
+        .card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 25px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .card-title {
+            font-size: 1.3rem;
+            font-weight: 600;
+        }
+        
+        /* Stock Info */
+        .stock-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+        }
+        
+        .info-item {
+            text-align: center;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 12px;
+        }
+        
+        .info-label {
+            font-size: 0.85rem;
+            color: #888;
+            margin-bottom: 5px;
+        }
+        
+        .info-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+        
+        .info-value.positive { color: #00d4aa; }
+        .info-value.negative { color: #ff6b6b; }
+        
+        /* Signal Badge */
+        .signal-badge {
+            display: inline-block;
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 1rem;
+        }
+        
+        .signal-buy { background: rgba(0, 212, 170, 0.2); color: #00d4aa; }
+        .signal-sell { background: rgba(255, 107, 107, 0.2); color: #ff6b6b; }
+        .signal-hold { background: rgba(255, 193, 7, 0.2); color: #ffc107; }
+        
+        /* Indicators Grid */
+        .indicators-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+        }
+        
+        .indicator-item {
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 10px;
+            text-align: center;
+        }
+        
+        .indicator-name {
+            font-size: 0.8rem;
+            color: #888;
+            margin-bottom: 5px;
+        }
+        
+        .indicator-value {
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+        
+        /* Chart Container */
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin-top: 20px;
+        }
+        
+        /* Risk Assessment */
+        .risk-bars {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .risk-bar {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .risk-label {
+            width: 100px;
+            font-size: 0.9rem;
+        }
+        
+        .risk-track {
+            flex: 1;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .risk-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.5s;
+        }
+        
+        .risk-fill.low { background: #00d4aa; }
+        .risk-fill.medium { background: #ffc107; }
+        .risk-fill.high { background: #ff6b6b; }
+        
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 40px 0;
+            color: #666;
+            font-size: 0.9rem;
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .header h1 { font-size: 1.8rem; }
+            .search-form { flex-direction: column; }
+            .search-form input, .search-form button { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div class="container">
+            <!-- Header -->
+            <div class="header">
+                <h1>🤖 AStockAgents</h1>
+                <p>多智能体协同股票分析系统</p>
+            </div>
+            
+            <!-- Search Box -->
+            <div class="search-box">
+                <div class="search-form">
+                    <input 
+                        v-model="stockCode" 
+                        placeholder="股票代码 (如: 600519.SH)"
+                        @keyup.enter="analyze"
+                    >
+                    <input 
+                        v-model="stockName" 
+                        placeholder="股票名称 (如: 贵州茅台)"
+                        @keyup.enter="analyze"
+                    >
+                    <button @click="analyze" :disabled="loading">
+                        {{ loading ? '分析中...' : '开始分析' }}
+                    </button>
+                </div>
+                
+                <div class="quick-stocks">
+                    <span style="color: #888; margin-right: 10px;">快速选择:</span>
+                    <span 
+                        class="quick-stock" 
+                        v-for="stock in popularStocks" 
+                        :key="stock.code"
+                        @click="quickSelect(stock)"
+                    >
+                        {{ stock.name }}
+                    </span>
+                </div>
+            </div>
+            
+            <!-- Loading -->
+            <div class="loading" v-if="loading">
+                <div class="loading-spinner"></div>
+                <p>正在分析 {{ stockName }}，请稍候...</p>
+            </div>
+            
+            <!-- Results -->
+            <div class="results" v-if="result && !loading">
+                <!-- Stock Overview -->
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <div class="card-title">{{ result.stock_name }}</div>
+                            <div style="color: #888; font-size: 0.9rem;">{{ result.stock_code }}</div>
+                        </div>
+                        <div>
+                            <span 
+                                class="signal-badge"
+                                :class="{
+                                    'signal-buy': isBuySignal,
+                                    'signal-sell': isSellSignal,
+                                    'signal-hold': isHoldSignal
+                                }"
+                            >
+                                {{ result.final_decision.signal }}
+                            </span>
+                        </div>
+                    </div>
+                    
+                    <div class="stock-info">
+                        <div class="info-item">
+                            <div class="info-label">当前价格</div>
+                            <div class="info-value">¥{{ result.current_price }}</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">涨跌幅</div>
+                            <div 
+                                class="info-value"
+                                :class="result.change_pct >= 0 ? 'positive' : 'negative'"
+                            >
+                                {{ result.change_pct >= 0 ? '+' : '' }}{{ result.change_pct }}%
+                            </div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">综合评分</div>
+                            <div class="info-value">{{ result.final_decision.score }}</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">置信度</div>
+                            <div class="info-value">{{ result.technical_analysis.confidence }}%</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Technical Analysis -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">📊 技术分析</div>
+                        <div style="color: #888;">
+                            趋势: {{ result.technical_analysis.trend }} 
+                            (强度: {{ result.technical_analysis.trend_strength }})
+                        </div>
+                    </div>
+                    
+                    <div class="indicators-grid">
+                        <div class="indicator-item">
+                            <div class="indicator-name">MA5</div>
+                            <div class="indicator-value">{{ result.technical_analysis.indicators.ma5 }}</div>
+                        </div>
+                        <div class="indicator-item">
+                            <div class="indicator-name">MA10</div>
+                            <div class="indicator-value">{{ result.technical_analysis.indicators.ma10 }}</div>
+                        </div>
+                        <div class="indicator-item">
+                            <div class="indicator-name">MA20</div>
+                            <div class="indicator-value">{{ result.technical_analysis.indicators.ma20 }}</div>
+                        </div>
+                        <div class="indicator-item">
+                            <div class="indicator-name">RSI</div>
+                            <div class="indicator-value">{{ result.technical_analysis.indicators.rsi }}</div>
+                        </div>
+                        <div class="indicator-item">
+                            <div class="indicator-name">MACD DIF</div>
+                            <div class="indicator-value">{{ result.technical_analysis.indicators.macd_dif }}</div>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 20px;" v-if="result.technical_analysis.patterns.length">
+                        <strong>识别形态:</strong>
+                        <span v-for="p in result.technical_analysis.patterns" :key="p" 
+                              style="margin-left: 10px; padding: 4px 12px; background: rgba(0,212,255,0.2); border-radius: 12px; font-size: 0.85rem;">
+                            {{ p }}
+                        </span>
+                    </div>
+                </div>
+                
+                <!-- Price Chart -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">📈 价格走势</div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="priceChart"></canvas>
+                    </div>
+                </div>
+                
+                <!-- Fundamental Analysis -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">📋 基本面分析</div>
+                    </div>
+                    
+                    <div class="indicators-grid">
+                        <div class="indicator-item">
+                            <div class="indicator-name">估值水平</div>
+                            <div class="indicator-value">{{ result.fundamental_analysis.valuation }}</div>
+                        </div>
+                        <div class="indicator-item">
+                            <div class="indicator-name">盈利能力</div>
+                            <div class="indicator-value">{{ result.fundamental_analysis.profitability }}</div>
+                        </div>
+                        <div class="indicator-item">
+                            <div class="indicator-name">成长性</div>
+                            <div class="indicator-value">{{ result.fundamental_analysis.growth }}</div>
+                        </div>
+                        <div class="indicator-item">
+                            <div class="indicator-name">PE(TTM)</div>
+                            <div class="indicator-value">{{ result.fundamental_analysis.pe_ttm }}</div>
+                        </div>
+                        <div class="indicator-item">
+                            <div class="indicator-name">PB</div>
+                            <div class="indicator-value">{{ result.fundamental_analysis.pb }}</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Risk Assessment -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">⚠️ 风险评估</div>
+                    </div>
+                    
+                    <div class="risk-bars">
+                        <div class="risk-bar">
+                            <div class="risk-label">整体风险</div>
+                            <div class="risk-track">
+                                <div 
+                                    class="risk-fill"
+                                    :class="getRiskClass(result.risk_assessment.overall_risk)"
+                                    :style="{ width: getRiskWidth(result.risk_assessment.overall_risk) }"
+                                ></div>
+                            </div>
+                            <span>{{ result.risk_assessment.overall_risk }}</span>
+                        </div>
+                        <div class="risk-bar">
+                            <div class="risk-label">市场风险</div>
+                            <div class="risk-track">
+                                <div 
+                                    class="risk-fill"
+                                    :class="getRiskClass(result.risk_assessment.market_risk)"
+                                    :style="{ width: getRiskWidth(result.risk_assessment.market_risk) }"
+                                ></div>
+                            </div>
+                            <span>{{ result.risk_assessment.market_risk }}</span>
+                        </div>
+                        <div class="risk-bar">
+                            <div class="risk-label">流动性风险</div>
+                            <div class="risk-track">
+                                <div 
+                                    class="risk-fill"
+                                    :class="getRiskClass(result.risk_assessment.liquidity_risk)"
+                                    :style="{ width: getRiskWidth(result.risk_assessment.liquidity_risk) }"
+                                ></div>
+                            </div>
+                            <span>{{ result.risk_assessment.liquidity_risk }}</span>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 20px;" v-if="result.risk_assessment.suggestions">
+                        <strong>建议:</strong>
+                        <ul style="margin-top: 10px; margin-left: 20px;">
+                            <li v-for="s in result.risk_assessment.suggestions" :key="s">{{ s }}</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <!-- Final Decision -->
+                <div class="card" style="text-align: center; padding: 40px;">
+                    <div style="font-size: 1.2rem; margin-bottom: 20px;">🎯 最终投资建议</div>
+                    <div style="font-size: 2rem; font-weight: 700; margin-bottom: 10px;">
+                        {{ result.final_decision.recommendation }}
+                    </div>
+                    <div style="color: #888; margin-bottom: 20px;">
+                        分析时间: {{ result.timestamp }}
+                    </div>
+                    <div style="color: #ff6b6b; font-size: 0.9rem;">
+                        ⚠️ 本分析结果仅供参考，不构成投资建议。投资有风险，入市需谨慎。
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Footer -->
+            <div class="footer">
+                <p>AStockAgents v1.0 | 多智能体协同股票分析系统</p>
+                <p style="margin-top: 5px;">Powered by LangGraph & FastAPI</p>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const { createApp } = Vue;
+        
+        createApp({
+            data() {
+                return {
+                    stockCode: '600519.SH',
+                    stockName: '贵州茅台',
+                    loading: false,
+                    result: null,
+                    popularStocks: [
+                        { code: '600519.SH', name: '贵州茅台' },
+                        { code: '000858.SZ', name: '五粮液' },
+                        { code: '000001.SZ', name: '平安银行' },
+                        { code: '600036.SH', name: '招商银行' },
+                    ],
+                    chart: null
+                }
+            },
+            computed: {
+                isBuySignal() {
+                    return this.result?.final_decision?.signal?.includes('买入');
+                },
+                isSellSignal() {
+                    return this.result?.final_decision?.signal?.includes('卖出');
+                },
+                isHoldSignal() {
+                    return this.result?.final_decision?.signal?.includes('持有');
+                }
+            },
+            methods: {
+                async analyze() {
+                    if (!this.stockCode) return;
+                    
+                    this.loading = true;
+                    
+                    try {
+                        const response = await axios.get('/api/analyze', {
+                            params: {
+                                stock_code: this.stockCode,
+                                stock_name: this.stockName || this.stockCode,
+                                days: 120
+                            }
+                        });
+                        
+                        this.result = response.data;
+                        
+                        // 更新图表
+                        this.$nextTick(() => {
+                            this.renderChart();
+                        });
+                        
+                    } catch (error) {
+                        console.error('分析失败:', error);
+                        alert('分析失败，请检查股票代码是否正确');
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+                
+                quickSelect(stock) {
+                    this.stockCode = stock.code;
+                    this.stockName = stock.name;
+                    this.analyze();
+                },
+                
+                getRiskClass(risk) {
+                    if (risk === '低') return 'low';
+                    if (risk === '中等') return 'medium';
+                    return 'high';
+                },
+                
+                getRiskWidth(risk) {
+                    if (risk === '低') return '30%';
+                    if (risk === '中等') return '60%';
+                    return '90%';
+                },
+                
+                renderChart() {
+                    if (!this.result?.price_data) return;
+                    
+                    const ctx = document.getElementById('priceChart');
+                    if (!ctx) return;
+                    
+                    if (this.chart) {
+                        this.chart.destroy();
+                    }
+                    
+                    const data = this.result.price_data;
+                    
+                    this.chart = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: data.map(d => d.date),
+                            datasets: [{
+                                label: '收盘价',
+                                data: data.map(d => d.close),
+                                borderColor: '#00d4ff',
+                                backgroundColor: 'rgba(0, 212, 255, 0.1)',
+                                fill: true,
+                                tension: 0.4
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: {
+                                    display: false
+                                }
+                            },
+                            scales: {
+                                x: {
+                                    grid: {
+                                        color: 'rgba(255, 255, 255, 0.1)'
+                                    },
+                                    ticks: {
+                                        color: '#888',
+                                        maxTicksLimit: 10
+                                    }
+                                },
+                                y: {
+                                    grid: {
+                                        color: 'rgba(255, 255, 255, 0.1)'
+                                    },
+                                    ticks: {
+                                        color: '#888'
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+            },
+            mounted() {
+                // 自动分析默认股票
+                this.analyze();
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
