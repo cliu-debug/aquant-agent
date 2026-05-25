@@ -10,6 +10,7 @@
 """
 
 import os
+import time
 from typing import List, Dict, Any, Optional, Callable
 from datetime import datetime
 from loguru import logger
@@ -23,71 +24,8 @@ from astock_agents.data.manager import DataManager
 from astock_agents.data.circuit_breaker import get_all_circuit_breaker_stats
 from astock_agents.db.database import Database
 from astock_agents.models.analysis_report import Signal
-
-
-class MetricsCollector:
-    """简易指标收集器 - 记录定时任务执行指标到内存和日志"""
-
-    def __init__(self) -> None:
-        """初始化指标收集器"""
-        self._metrics: Dict[str, Dict[str, Any]] = {}
-
-    def record(self, name: str, value: Any) -> None:
-        """记录指标
-
-        Args:
-            name: 指标名称
-            value: 指标值
-        """
-        self._metrics[name] = {
-            "value": value,
-            "timestamp": datetime.now().isoformat(),
-        }
-        logger.debug(f"[指标] {name} = {value}")
-
-    def get(self, name: str) -> Optional[Any]:
-        """获取指标值
-
-        Args:
-            name: 指标名称
-
-        Returns:
-            指标值，不存在时返回 None
-        """
-        entry = self._metrics.get(name)
-        return entry["value"] if entry else None
-
-    def get_all(self) -> Dict[str, Any]:
-        """获取所有指标
-
-        Returns:
-            以指标名称为键、含 value 和 timestamp 的字典为值的字典
-        """
-        return dict(self._metrics)
-
-
-class NotificationService:
-    """简易通知服务 - 信号变化时触发通知（日志输出）"""
-
-    @staticmethod
-    def notify_signal_change(
-        stock_code: str,
-        stock_name: str,
-        old_signal: Optional[str],
-        new_signal: str,
-    ) -> None:
-        """发送信号变化通知
-
-        Args:
-            stock_code: 股票代码
-            stock_name: 股票名称
-            old_signal: 旧信号文本
-            new_signal: 新信号文本
-        """
-        logger.warning(
-            f"[通知] 信号变化: {stock_name}({stock_code}) "
-            f"从 [{old_signal}] 变为 [{new_signal}]"
-        )
+from astock_agents.services.metrics import get_metrics_collector
+from astock_agents.services.notification import get_notification_service
 
 
 class SchedulerService:
@@ -128,8 +66,8 @@ class SchedulerService:
         self._analysis_workflow: AnalysisWorkflow = analysis_workflow or AnalysisWorkflow()
         self._data_manager: DataManager = data_manager or DataManager()
 
-        self._metrics: MetricsCollector = MetricsCollector()
-        self._notification: NotificationService = NotificationService()
+        self._metrics = get_metrics_collector()
+        self._notification = get_notification_service()
 
         # 读取环境变量配置
         self._enabled: bool = os.environ.get(
@@ -317,9 +255,9 @@ class SchedulerService:
             signal_change_count: int = 0
 
             logger.info(f"[自选股分析] 开始分析, 共 {total} 只股票")
-            self._metrics.record("watchlist_analysis_total", total)
 
             for item in items:
+                start_time = time.time()
                 try:
                     # 执行分析
                     report = self._analysis_workflow.analyze(
@@ -334,6 +272,14 @@ class SchedulerService:
                         else "未知"
                     )
                     old_signal: Optional[str] = item.last_signal
+                    duration = time.time() - start_time
+
+                    # 记录分析指标
+                    self._metrics.record_analysis(
+                        stock_code=item.stock_code,
+                        signal=new_signal,
+                        duration=duration,
+                    )
 
                     # 保存分析结果到数据库
                     self._db.save_analysis(
@@ -353,11 +299,12 @@ class SchedulerService:
                     # 检测信号方向性反转并触发通知
                     if old_signal and old_signal != new_signal:
                         if self._is_signal_reversed(old_signal, new_signal):
-                            self._notification.notify_signal_change(
+                            self._notification.send_signal_change(
                                 stock_code=item.stock_code,
                                 stock_name=item.stock_name,
                                 old_signal=old_signal,
                                 new_signal=new_signal,
+                                confidence=(report.final_confidence or 0) / 100.0,
                             )
                             signal_change_count += 1
 
@@ -372,16 +319,7 @@ class SchedulerService:
                         f"[自选股分析] 分析失败: "
                         f"{item.stock_name}({item.stock_code}), 错误: {e}"
                     )
-
-            # 记录指标
-            self._metrics.record("watchlist_analysis_success", success_count)
-            self._metrics.record("watchlist_analysis_failed", total - success_count)
-            self._metrics.record(
-                "watchlist_analysis_signal_changes", signal_change_count
-            )
-            self._metrics.record(
-                "watchlist_analysis_last_run", datetime.now().isoformat()
-            )
+                    self._metrics.record_analysis_error("watchlist_analysis")
 
             logger.info(
                 f"[自选股分析] 完成: 成功={success_count}, "
@@ -409,18 +347,11 @@ class SchedulerService:
                 if stats.get("state") == "OPEN"
             )
 
-            # 记录指标
-            self._metrics.record(
-                "health_status", health_status.get("status", "unknown")
-            )
-            self._metrics.record("health_open_breakers", open_count)
-            self._metrics.record(
-                "health_data_sources",
-                len(health_status.get("data_sources", [])),
-            )
-            self._metrics.record(
-                "health_check_last_run", datetime.now().isoformat()
-            )
+            # 更新断路器 Prometheus 指标
+            for name, stats in cb_stats.items():
+                self._metrics.update_circuit_breaker_state(
+                    name=name, state=stats.get("state", "CLOSED")
+                )
 
             # 记录健康状态到日志
             if health_status.get("status") == "healthy":
@@ -439,7 +370,6 @@ class SchedulerService:
 
         except Exception as e:
             logger.error(f"[健康检查] 任务异常: {e}")
-            self._metrics.record("health_status", "error")
 
     def portfolio_snapshot(self) -> None:
         """
@@ -460,25 +390,16 @@ class SchedulerService:
             total_value: float = portfolio.total_market_value or 0
             total_pnl: float = portfolio.total_pnl or 0
             total_pnl_pct: float = portfolio.total_pnl_pct or 0
+            position_count: int = len(portfolio.positions)
 
-            # 记录指标
-            self._metrics.record("portfolio_total_value", total_value)
-            self._metrics.record("portfolio_total_pnl", total_pnl)
-            self._metrics.record("portfolio_total_pnl_pct", total_pnl_pct)
-            self._metrics.record(
-                "portfolio_position_count", len(portfolio.positions)
-            )
-            self._metrics.record(
-                "portfolio_available_cash", portfolio.available_cash
-            )
-            self._metrics.record(
-                "portfolio_snapshot_last_run", datetime.now().isoformat()
-            )
+            # 更新 Prometheus 指标
+            self._metrics.update_portfolio_value(total_value)
+            self._metrics.update_active_positions(position_count)
 
             logger.info(
                 f"[组合快照] 总值={total_value:,.0f}, "
                 f"盈亏={total_pnl:,.0f}({total_pnl_pct}%), "
-                f"持仓={len(portfolio.positions)}只, "
+                f"持仓={position_count}只, "
                 f"可用资金={portfolio.available_cash:,.0f}"
             )
 

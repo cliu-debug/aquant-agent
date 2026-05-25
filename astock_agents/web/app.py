@@ -172,6 +172,18 @@ async def health_check(request: Request):
     }
 
 
+@app.get("/metrics")
+@limiter.limit("30/minute")
+async def metrics_endpoint(request: Request):
+    """Prometheus 指标端点 - 供 Prometheus 拉取"""
+    from astock_agents.services.metrics import generate_metrics
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(
+        generate_metrics(),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
+
+
 @app.get("/api/system/circuit-breakers")
 @limiter.limit("30/minute")
 async def get_circuit_breakers(request: Request):
@@ -235,6 +247,9 @@ async def analyze_stock(request: Request, body: AnalysisRequest):
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"工作流引擎不可用: {str(e)}")
 
+    import time as _time
+    _start_time = _time.time()
+
     try:
         # 在线程池中执行同步的工作流分析，避免阻塞事件循环
         loop = asyncio.get_event_loop()
@@ -282,10 +297,29 @@ async def analyze_stock(request: Request, body: AnalysisRequest):
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         )
 
+        # 记录分析指标
+        try:
+            from astock_agents.services.metrics import get_metrics_collector
+            _duration = _time.time() - _start_time
+            _signal = report.final_signal.value if report.final_signal else "unknown"
+            get_metrics_collector().record_analysis(
+                stock_code=validated_code, signal=_signal, duration=_duration
+            )
+        except Exception:
+            pass  # 指标记录不应影响主流程
+
         return response
 
     except Exception as e:
         logger.error(f"[Web] 分析失败: {body.stock_code}, {e}")
+
+        # 记录分析错误指标
+        try:
+            from astock_agents.services.metrics import get_metrics_collector
+            get_metrics_collector().record_analysis_error("api_error")
+        except Exception:
+            pass
+
         raise HTTPException(status_code=500, detail=f"分析失败: {str(e)}")
 
 
@@ -729,6 +763,103 @@ async def portfolio_risk_analysis(request: Request):
     except Exception as e:
         logger.error(f"[Web] 组合风险分析失败: {e}")
         raise HTTPException(status_code=500, detail=f"组合风险分析失败: {str(e)}")
+
+
+# ==================== 调度器API ====================
+
+_scheduler_service = None
+
+
+def _get_scheduler_service():
+    """懒加载调度器服务"""
+    global _scheduler_service
+    if _scheduler_service is None:
+        from astock_agents.services.scheduler import SchedulerService
+        _scheduler_service = SchedulerService()
+    return _scheduler_service
+
+
+@app.get("/api/scheduler/status")
+@limiter.limit("30/minute")
+async def scheduler_status(request: Request):
+    """获取调度器状态"""
+    scheduler = _get_scheduler_service()
+    return {
+        "enabled": scheduler.is_running,
+        "jobs": scheduler.get_jobs() if scheduler.is_running else [],
+    }
+
+
+@app.post("/api/scheduler/start")
+@limiter.limit("10/minute")
+async def scheduler_start(request: Request):
+    """启动调度器"""
+    scheduler = _get_scheduler_service()
+    if scheduler.is_running:
+        return {"success": True, "message": "调度器已在运行中"}
+    try:
+        scheduler.start()
+        return {"success": True, "message": "调度器已启动"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"启动调度器失败: {str(e)}")
+
+
+@app.post("/api/scheduler/stop")
+@limiter.limit("10/minute")
+async def scheduler_stop(request: Request):
+    """停止调度器"""
+    scheduler = _get_scheduler_service()
+    if not scheduler.is_running:
+        return {"success": True, "message": "调度器未在运行"}
+    try:
+        scheduler.stop()
+        return {"success": True, "message": "调度器已停止"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"停止调度器失败: {str(e)}")
+
+
+# ==================== 通知API ====================
+
+@app.get("/api/notifications/history")
+@limiter.limit("30/minute")
+async def notification_history(request: Request, limit: int = 20):
+    """获取通知历史"""
+    from astock_agents.services.notification import get_notification_service
+    service = get_notification_service()
+    history = service.get_history(limit=limit)
+    return {
+        "notifications": [n.to_dict() for n in history],
+        "total": len(history),
+    }
+
+
+@app.get("/api/notifications/channels")
+@limiter.limit("30/minute")
+async def notification_channels(request: Request):
+    """获取通知通道状态"""
+    from astock_agents.services.notification import get_notification_service, NotificationChannel
+    service = get_notification_service()
+    return {
+        "channels": {
+            ch.value: service.is_enabled(ch)
+            for ch in NotificationChannel
+        }
+    }
+
+
+@app.post("/api/notifications/test")
+@limiter.limit("5/minute")
+async def notification_test(request: Request):
+    """发送测试通知"""
+    from astock_agents.services.notification import get_notification_service, NotificationMessage
+    service = get_notification_service()
+    message = NotificationMessage(
+        title="测试通知",
+        body="这是一条来自AStockAgents的测试通知，如果您收到此消息，说明通知服务配置正确。",
+        level="info",
+    )
+    success = service.send(message)
+    return {"success": success, "message": "测试通知已发送" if success else "测试通知发送失败"}
 
 
 # ==================== 启动函数 ====================

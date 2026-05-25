@@ -32,3 +32,7 @@ uvicorn>=0.27.0
 python-multipart>=0.0.6
 slowapi>=0.1.9
 PyJWT>=2.8.0
+
+# Monitoring & Scheduling
+prometheus-client>=0.20.0
+apscheduler>=3.10.0
