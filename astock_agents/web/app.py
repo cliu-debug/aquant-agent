@@ -121,6 +121,22 @@ class AnalysisResponse(BaseModel):
     timestamp: str
 
 
+class BacktestSignal(BaseModel):
+    """回测交易信号"""
+    date: str = Field(..., description="交易日期，格式 YYYY-MM-DD")
+    action: str = Field(..., description="交易动作: buy / sell")
+
+
+class BacktestRequest(BaseModel):
+    """回测请求"""
+    stock_code: str = Field(..., description="股票代码，如 600519.SH")
+    strategy_name: str = Field("自定义策略", description="策略名称")
+    signals: List[BacktestSignal] = Field(..., description="交易信号列表")
+    position_size_pct: float = Field(0.2, description="每次开仓占总资金比例")
+    stop_loss_pct: float = Field(0.07, description="止损比例")
+    take_profit_pct: float = Field(0.15, description="止盈比例")
+
+
 # ==================== API路由 ====================
 
 @app.get("/", response_class=HTMLResponse)
@@ -342,6 +358,30 @@ def _get_review():
     return _review
 
 
+_backtest_engine = None
+
+
+def _get_backtest_engine():
+    """懒加载回测引擎"""
+    global _backtest_engine
+    if _backtest_engine is None:
+        from astock_agents.services.backtest import BacktestEngine
+        _backtest_engine = BacktestEngine()
+    return _backtest_engine
+
+
+_data_manager = None
+
+
+def _get_data_manager():
+    """懒加载数据管理器"""
+    global _data_manager
+    if _data_manager is None:
+        from astock_agents.data.data_manager import DataManager
+        _data_manager = DataManager()
+    return _data_manager
+
+
 # ---------- 选股器 ----------
 
 @app.get("/api/screener/presets")
@@ -516,6 +556,83 @@ async def get_review_records(request: Request, status: Optional[str] = None):
     review = _get_review()
     records = review.get_records(status=status)
     return {"records": [r.model_dump() for r in records]}
+
+
+# ---------- 回测引擎 ----------
+
+@app.post("/api/backtest/run")
+@limiter.limit("5/minute")
+async def run_backtest(request: Request, body: BacktestRequest):
+    """
+    执行回测
+
+    基于历史数据和交易信号模拟交易，计算策略收益和风险指标。
+    限流: 每分钟5次请求
+
+    请求体示例:
+    {
+        "stock_code": "600519.SH",
+        "strategy_name": "均线策略",
+        "signals": [
+            {"date": "2024-01-15", "action": "buy"},
+            {"date": "2024-02-20", "action": "sell"}
+        ],
+        "position_size_pct": 0.2,
+        "stop_loss_pct": 0.07,
+        "take_profit_pct": 0.15
+    }
+    """
+    # 验证股票代码格式
+    try:
+        validated_code = validate_stock_code(body.stock_code)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # 验证交易信号
+    if not body.signals:
+        raise HTTPException(status_code=400, detail="交易信号列表不能为空")
+
+    for sig in body.signals:
+        if sig.action not in ("buy", "sell"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"无效的交易动作: {sig.action}，仅支持 buy/sell"
+            )
+
+    # 获取股票历史数据
+    try:
+        dm = _get_data_manager()
+        stock_data = dm.get_stock_data(validated_code)
+    except Exception as e:
+        logger.error(f"[Web] 回测获取数据失败: {validated_code}, {e}")
+        raise HTTPException(status_code=503, detail=f"获取股票数据失败: {str(e)}")
+
+    if not stock_data or not stock_data.prices:
+        raise HTTPException(status_code=404, detail=f"未找到 {validated_code} 的历史数据")
+
+    # 执行回测
+    try:
+        engine = _get_backtest_engine()
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: engine.run(
+                stock_data=stock_data,
+                signals=[{"date": s.date, "action": s.action} for s in body.signals],
+                strategy_name=body.strategy_name,
+                position_size_pct=body.position_size_pct,
+                stop_loss_pct=body.stop_loss_pct,
+                take_profit_pct=body.take_profit_pct,
+            )
+        )
+
+        # 将 dataclass 转为可序列化的字典
+        from dataclasses import asdict
+        return asdict(result)
+
+    except Exception as e:
+        logger.error(f"[Web] 回测执行失败: {validated_code}, {e}")
+        raise HTTPException(status_code=500, detail=f"回测执行失败: {str(e)}")
 
 
 # ==================== 启动函数 ====================
