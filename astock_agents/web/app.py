@@ -19,6 +19,9 @@ import yaml
 import asyncio
 from loguru import logger
 
+from astock_agents.web.auth import auth_middleware, generate_jwt_token, is_auth_enabled
+from astock_agents.web.validators import validate_stock_code, validate_quantity, validate_price
+
 # 创建限流器实例
 limiter = Limiter(key_func=get_remote_address)
 
@@ -55,6 +58,9 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+# 认证中间件（在CORS之后添加）
+app.middleware("http")(auth_middleware)
 
 # 延迟初始化工作流（避免导入时连接数据源）
 _workflow = None
@@ -142,6 +148,41 @@ async def health_check(request: Request):
     }
 
 
+# ==================== 认证API ====================
+
+class TokenRequest(BaseModel):
+    """Token请求"""
+    api_key: str = Field(..., description="API Key")
+
+
+class TokenResponse(BaseModel):
+    """Token响应"""
+    token: str = Field(..., description="JWT Token")
+    expires_in: int = Field(..., description="有效期（秒）")
+
+
+@app.post("/api/auth/token", response_model=TokenResponse)
+@limiter.limit("10/minute")
+async def get_token(request: Request, body: TokenRequest):
+    """
+    获取JWT Token
+
+    通过API Key换取JWT Token，后续请求使用Bearer Token认证。
+    限流: 每分钟10次请求
+    """
+    if not is_auth_enabled():
+        raise HTTPException(status_code=400, detail="认证未启用，无需获取Token")
+
+    try:
+        token = generate_jwt_token(body.api_key)
+        return TokenResponse(
+            token=token,
+            expires_in=24 * 3600,
+        )
+    except ValueError:
+        raise HTTPException(status_code=401, detail="API Key无效")
+
+
 @app.post("/api/analyze", response_model=AnalysisResponse)
 @limiter.limit("5/minute")
 async def analyze_stock(request: Request, body: AnalysisRequest):
@@ -151,6 +192,12 @@ async def analyze_stock(request: Request, body: AnalysisRequest):
     执行完整的多智能体协同分析流程
     限流: 每分钟5次请求
     """
+    try:
+        # 验证股票代码格式
+        validated_code = validate_stock_code(body.stock_code)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     try:
         workflow = _get_workflow()
     except Exception as e:
@@ -162,7 +209,7 @@ async def analyze_stock(request: Request, body: AnalysisRequest):
         report = await loop.run_in_executor(
             None,
             lambda: workflow.analyze(
-                stock_code=body.stock_code,
+                stock_code=validated_code,
                 stock_name=body.stock_name
             )
         )
@@ -377,6 +424,24 @@ async def place_order(request: Request, body: Dict[str, Any]):
     from astock_agents.models.portfolio import TradeDirection, OrderType
     pt = _get_paper_trading()
 
+    # 验证股票代码
+    try:
+        validated_code = validate_stock_code(body.get("stock_code", ""))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # 验证交易数量
+    try:
+        validated_quantity = validate_quantity(body.get("quantity", 100))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # 验证价格
+    try:
+        validated_price = validate_price(body.get("price"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     try:
         direction = TradeDirection(body.get("direction", "买入"))
         order_type = OrderType(body.get("order_type", "市价单"))
@@ -384,12 +449,12 @@ async def place_order(request: Request, body: Dict[str, Any]):
         raise HTTPException(status_code=400, detail=f"参数错误: {e}")
 
     order = pt.place_order(
-        stock_code=body.get("stock_code", ""),
+        stock_code=validated_code,
         stock_name=body.get("stock_name", ""),
         direction=direction,
-        quantity=body.get("quantity", 100),
+        quantity=validated_quantity,
         order_type=order_type,
-        price=body.get("price"),
+        price=validated_price,
         reason=body.get("reason"),
         signal_source=body.get("signal_source"),
     )
