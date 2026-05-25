@@ -27,6 +27,9 @@ from astock_agents.models import StockData, TechnicalAnalysis, Signal
 class TechnicalAnalyst(BaseAgent):
     """技术分析师 - 负责技术分析（增强版）"""
     
+    # 数值计算精度常量，用于除零保护
+    EPS = 1e-10
+
     # 形态类型定义
     BULLISH_PATTERNS = [
         "看涨吞没", "看涨孕线", "早晨之星", "锤子线", "刺透形态",
@@ -54,8 +57,8 @@ class TechnicalAnalyst(BaseAgent):
             logger.warning(f"[{self.name}] 无价格数据")
             return self._create_empty_analysis()
         
-        # 准备数据
-        df = self._prepare_data(stock_data)
+        # 准备数据（创建副本，防止后续方法对df的修改影响原始数据）
+        df = self._prepare_data(stock_data).copy()
         
         # 计算所有技术指标
         indicators = self._calculate_all_indicators(df)
@@ -89,7 +92,7 @@ class TechnicalAnalyst(BaseAgent):
             confidence=confidence
         )
         
-        self.log_analysis(analysis.dict())
+        self.log_analysis(analysis.model_dump())
         return analysis
     
     def _prepare_data(self, stock_data: StockData) -> pd.DataFrame:
@@ -237,7 +240,7 @@ class TechnicalAnalyst(BaseAgent):
         """计算KDJ"""
         low_min = df['low'].rolling(window=n).min()
         high_max = df['high'].rolling(window=n).max()
-        rsv = 100 * (df['close'] - low_min) / (high_max - low_min + 1e-10)
+        rsv = 100 * (df['close'] - low_min) / (high_max - low_min + self.EPS)
         df['k'] = rsv.ewm(com=2, adjust=False).mean()
         df['d'] = df['k'].ewm(com=2, adjust=False).mean()
         df['j'] = 3 * df['k'] - 2 * df['d']
@@ -356,9 +359,13 @@ class TechnicalAnalyst(BaseAgent):
         else:
             trend = "资金流出"
         
-        # OBV与价格背离
-        price_trend = df['close'].iloc[-1] > df['close'].iloc[-20]
-        obv_trend = df['obv'].iloc[-1] > df['obv'].iloc[-20]
+        # OBV与价格背离（添加数据长度检查，防止越界）
+        if len(df) >= 20:
+            price_trend = df['close'].iloc[-1] > df['close'].iloc[-20]
+            obv_trend = df['obv'].iloc[-1] > df['obv'].iloc[-20]
+        else:
+            price_trend = True
+            obv_trend = True
         
         if price_trend and not obv_trend:
             divergence = "顶背离"
@@ -397,7 +404,7 @@ class TechnicalAnalyst(BaseAgent):
         """计算CCI (Commodity Channel Index) - 顺势指标"""
         tp = (df['high'] + df['low'] + df['close']) / 3
         ma = tp.rolling(window=n).mean()
-        md = tp.rolling(window=n).apply(lambda x: np.abs(x - x.mean()).mean())
+        md = (tp - ma).abs().rolling(window=n).mean()
         
         df['cci'] = (tp - ma) / (0.015 * md)
         
@@ -439,8 +446,9 @@ class TechnicalAnalyst(BaseAgent):
         plus_di = 100 * (plus_dm.rolling(window=n).mean() / atr)
         minus_di = 100 * (minus_dm.rolling(window=n).mean() / atr)
         
-        # 计算DX和ADX
-        dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
+        # 计算DX和ADX（添加除零保护）
+        di_sum = plus_di + minus_di
+        dx = 100 * abs(plus_di - minus_di) / di_sum.replace(0, self.EPS)
         adx = dx.rolling(window=n).mean()
         
         adx_value = adx.iloc[-1]
@@ -1006,7 +1014,7 @@ class TechnicalAnalyst(BaseAgent):
         else:
             signal = Signal.HOLD
         
-        confidence = int(abs(score - 50) * 2)
+        confidence = min(100, max(10, int(abs(score - 50) * 2)))
         
         return signal, confidence
     

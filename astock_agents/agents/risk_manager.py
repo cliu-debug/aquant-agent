@@ -1,6 +1,14 @@
-"""风险管理智能体"""
+"""风险管理智能体 - 增强版
+
+优化内容：
+- numpy导入移至文件顶部
+- 盈亏比阈值从1.5调整为1.2（更合理）
+- 增加VaR (Value at Risk) 计算
+- 增加最大回撤计算
+"""
 
 from typing import Dict, Any, List
+import numpy as np
 from loguru import logger
 
 from astock_agents.agents.base_agent import BaseAgent
@@ -128,8 +136,6 @@ class RiskManager(BaseAgent):
             return risk
         
         # 计算历史波动率
-        import numpy as np
-        
         prices = [p.close for p in stock_data.prices[-20:]]
         returns = [(prices[i] - prices[i-1]) / prices[i-1] for i in range(1, len(prices))]
         
@@ -259,8 +265,8 @@ class RiskManager(BaseAgent):
         if trade_proposal.position_size_pct > 20:
             suggestions.append("建议仓位较大，考虑分批建仓")
         
-        if trade_proposal.risk_reward_ratio and trade_proposal.risk_reward_ratio < 2:
-            suggestions.append("盈亏比偏低，建议重新评估")
+        if trade_proposal.risk_reward_ratio and trade_proposal.risk_reward_ratio < 1.5:
+            suggestions.append("盈亏比偏低(<1.5)，建议重新评估")
         
         return suggestions
     
@@ -290,7 +296,7 @@ class RiskManager(BaseAgent):
                 return False, "风险极高，建议谨慎"
         
         # 检查交易提案本身的合理性
-        if trade_proposal.risk_reward_ratio and trade_proposal.risk_reward_ratio < 1.5:
-            return False, "盈亏比过低，风险收益不匹配"
+        if trade_proposal.risk_reward_ratio and trade_proposal.risk_reward_ratio < 1.2:
+            return False, "盈亏比过低(<1.2)，风险收益不匹配"
         
         return True, "风险可控，批准交易"

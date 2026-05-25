@@ -117,7 +117,7 @@ class NewsAnalysis(BaseModel):
     industry_updates: str = Field(..., description="行业动态")
     
     # 风险事件
-    risk_events: List[str] = Field(default_factory=list, description="风险事件")
+    risk_events: List[Dict[str, str]] = Field(default_factory=list, description="风险事件（含等级）")
     
     # 分析摘要
     summary: str = Field(..., description="新闻分析总结")
@@ -230,6 +230,9 @@ class AnalysisReport(BaseModel):
     
     # 元数据
     metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    # 错误收集
+    errors: List[str] = Field(default_factory=list, description="分析过程中的错误/警告")
     
     def generate_summary(self) -> str:
         """生成报告摘要"""

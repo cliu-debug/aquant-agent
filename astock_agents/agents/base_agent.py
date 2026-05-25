@@ -30,8 +30,9 @@ class BaseAgent(ABC):
         self.name = name
         self.role = role
         self.config = config or {}
-        self.llm = llm  # LLM是可选的，某些智能体不需要LLM
-        
+        # 如果未传入LLM，尝试从配置创建
+        self.llm = llm or self._create_default_llm()
+
         logger.info(f"智能体初始化: {name} ({role})")
     
     def _create_default_llm(self) -> Optional[Any]:
@@ -60,7 +61,7 @@ class BaseAgent(ABC):
                     
                 from langchain_anthropic import ChatAnthropic
                 return ChatAnthropic(
-                    model=llm_config.get("anthropic", {}).get("model", "claude-3-sonnet-20240229"),
+                    model=llm_config.get("anthropic", {}).get("model", "claude-3-5-sonnet-20241022"),
                     temperature=llm_config.get("anthropic", {}).get("temperature", 0.3),
                     api_key=api_key,
                 )
@@ -110,32 +111,34 @@ class BaseAgent(ABC):
     def _call_llm(self, prompt: str, system_prompt: Optional[str] = None) -> str:
         """
         调用LLM
-        
+
         Args:
             prompt: 用户提示词
             system_prompt: 系统提示词
-        
+
         Returns:
             LLM回复
+
+        Raises:
+            RuntimeError: LLM未配置或调用失败时抛出
         """
         if not self.llm:
-            logger.warning(f"[{self.name}] LLM未配置，返回默认响应")
-            return "LLM未配置，无法执行分析"
-        
+            raise RuntimeError(f"[{self.name}] LLM未配置，无法执行分析")
+
         try:
             messages = []
-            
+
             if system_prompt:
                 messages.append(("system", system_prompt))
-            
+
             messages.append(("human", prompt))
-            
+
             response = self.llm.invoke(messages)
             return response.content
-            
+
         except Exception as e:
             logger.error(f"[{self.name}] LLM调用失败: {e}")
-            return f"分析失败: {str(e)}"
+            raise RuntimeError(f"LLM调用失败: {e}") from e
     
     def log_analysis(self, result: Dict[str, Any]):
         """记录分析结果"""

@@ -116,4 +116,4 @@ class ReportFormatter:
     
     def format_json(self, report: AnalysisReport) -> str:
         """格式化为JSON"""
-        return json.dumps(report.dict(), ensure_ascii=False, indent=2, default=str)
+        return json.dumps(report.model_dump(), ensure_ascii=False, indent=2, default=str)

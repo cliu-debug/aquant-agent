@@ -2,11 +2,13 @@
 
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class StockPrice(BaseModel):
     """股票价格数据"""
+    model_config = ConfigDict(json_encoders={datetime: lambda v: v.strftime("%Y-%m-%d")})
+
     date: datetime
     open: float
     high: float
@@ -14,14 +16,9 @@ class StockPrice(BaseModel):
     close: float
     volume: int
     amount: Optional[float] = None  # 成交额
-    
+
     # 复权价格
     adj_close: Optional[float] = None
-    
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.strftime("%Y-%m-%d")
-        }
 
 
 class FinancialReport(BaseModel):
@@ -52,6 +49,8 @@ class FinancialReport(BaseModel):
 
 class StockData(BaseModel):
     """股票完整数据"""
+    model_config = ConfigDict(json_encoders={datetime: lambda v: v.strftime("%Y-%m-%d %H:%M:%S")})
+
     # 基础信息
     stock_code: str = Field(..., description="股票代码，如 000001.SZ")
     stock_name: str = Field(..., description="股票名称")
@@ -84,12 +83,7 @@ class StockData(BaseModel):
     
     # 数据更新时间
     updated_at: datetime = Field(default_factory=datetime.now)
-    
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.strftime("%Y-%m-%d %H:%M:%S")
-        }
-    
+
     def get_latest_price(self) -> Optional[StockPrice]:
         """获取最新价格"""
         if not self.prices:

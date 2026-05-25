@@ -175,20 +175,31 @@ class BullResearcher(BaseAgent):
         news: NewsAnalysis
     ) -> int:
         """计算看多置信度"""
-        scores = [
+        # 所有维度的置信度（无论信号方向）
+        all_confidences = [
+            technical.confidence,
+            fundamental.confidence,
+            sentiment.confidence,
+            news.confidence,
+        ]
+
+        # 买入信号的置信度
+        buy_confidences = [
             technical.confidence if technical.signal.value in ["买入", "强烈买入"] else 0,
             fundamental.confidence if fundamental.signal.value in ["买入", "强烈买入"] else 0,
             sentiment.confidence if sentiment.signal.value in ["买入", "强烈买入"] else 0,
             news.confidence if news.signal.value in ["买入", "强烈买入"] else 0,
         ]
-        
-        # 取平均值
-        avg_score = sum(scores) / len(scores) if scores else 50
-        
-        # 根据信号数量加权
-        buy_signals = sum(1 for s in [technical.signal, fundamental.signal, sentiment.signal, news.signal] 
+
+        # 基础分：所有维度置信度均值的30%
+        base_score = sum(all_confidences) / len(all_confidences) * 0.3
+
+        # 买入信号加权
+        buy_score = sum(buy_confidences) / len(buy_confidences) * 0.5
+
+        # 信号数量加权
+        buy_signals = sum(1 for s in [technical.signal, fundamental.signal, sentiment.signal, news.signal]
                          if s.value in ["买入", "强烈买入"])
-        
         bonus = buy_signals * 5
-        
-        return min(100, int(avg_score + bonus))
+
+        return min(100, int(base_score + buy_score + bonus))

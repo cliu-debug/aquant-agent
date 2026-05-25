@@ -59,6 +59,9 @@ app.add_middleware(
 # 延迟初始化工作流（避免导入时连接数据源）
 _workflow = None
 
+# 当前文件所在目录（兼容 python -m 启动方式）
+_CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 
 def _load_config() -> Dict[str, Any]:
     """加载配置文件"""
@@ -118,7 +121,7 @@ class AnalysisResponse(BaseModel):
 @limiter.limit("30/minute")
 async def root(request: Request):
     """返回主页"""
-    html_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
+    html_path = os.path.join(_CURRENT_DIR, "static", "index.html")
     if os.path.exists(html_path):
         with open(html_path, "r", encoding="utf-8") as f:
             return f.read()

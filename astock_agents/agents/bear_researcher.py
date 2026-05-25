@@ -157,7 +157,10 @@ class BearResearcher(BaseAgent):
         if news.risk_events:
             args.append(f"发现{len(news.risk_events)}项风险事件")
             for event in news.risk_events[:2]:
-                args.append(f"  - {event}")
+                level = event.get("level", "未知")
+                keyword = event.get("keyword", "")
+                title = event.get("title", "")
+                args.append(f"  - [{level}风险-{keyword}] {title}")
         
         return args
     
@@ -169,20 +172,31 @@ class BearResearcher(BaseAgent):
         news: NewsAnalysis
     ) -> int:
         """计算看空置信度"""
-        scores = [
+        # 所有维度的置信度（无论信号方向）
+        all_confidences = [
+            technical.confidence,
+            fundamental.confidence,
+            sentiment.confidence,
+            news.confidence,
+        ]
+
+        # 卖出信号的置信度
+        sell_confidences = [
             technical.confidence if technical.signal.value in ["卖出", "强烈卖出"] else 0,
             fundamental.confidence if fundamental.signal.value in ["卖出", "强烈卖出"] else 0,
             sentiment.confidence if sentiment.signal.value in ["卖出", "强烈卖出"] else 0,
             news.confidence if news.signal.value in ["卖出", "强烈卖出"] else 0,
         ]
-        
-        # 取平均值
-        avg_score = sum(scores) / len(scores) if scores else 50
-        
-        # 根据信号数量加权
-        sell_signals = sum(1 for s in [technical.signal, fundamental.signal, sentiment.signal, news.signal] 
+
+        # 基础分：所有维度置信度均值的30%
+        base_score = sum(all_confidences) / len(all_confidences) * 0.3
+
+        # 卖出信号加权
+        sell_score = sum(sell_confidences) / len(sell_confidences) * 0.5
+
+        # 信号数量加权
+        sell_signals = sum(1 for s in [technical.signal, fundamental.signal, sentiment.signal, news.signal]
                           if s.value in ["卖出", "强烈卖出"])
-        
         bonus = sell_signals * 5
-        
-        return min(100, int(avg_score + bonus))
+
+        return min(100, int(base_score + sell_score + bonus))

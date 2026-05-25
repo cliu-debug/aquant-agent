@@ -54,7 +54,7 @@ class Trader(BaseAgent):
         
         # 计算预期收益和风险
         expected_return, risk_reward = self._calculate_risk_reward(
-            entry_price, target_price, stop_loss
+            entry_price, target_price, stop_loss, direction
         )
         
         # 确定时间框架
@@ -168,60 +168,89 @@ class Trader(BaseAgent):
         technical: TechnicalAnalysis,
         direction: Signal
     ) -> tuple:
-        """计算价格区间"""
+        """
+        计算价格区间
+
+        买入方向：目标取最近阻力位（第一档），止损取最近支撑位（第一档）
+        卖出方向：目标取最近支撑位（第一档），止损取最近阻力位（第一档）
+        """
         current_price = stock_data.current_price
-        
+
         if not current_price:
             return None, None, None
-        
+
         entry = current_price
-        
-        # 基于支撑阻力位计算
+
         if direction in [Signal.BUY, Signal.STRONG_BUY]:
-            # 买入：目标为最近阻力位，止损为最近支撑位
+            # 买入：目标为最近阻力位（最接近当前价且高于当前价的阻力位）
             if technical.resistance_levels:
-                target = technical.resistance_levels[0]
+                # 阻力位按降序排列，取最接近当前价的（即大于当前价的最小阻力位）
+                nearby_resistance = [r for r in technical.resistance_levels if r > current_price]
+                target = nearby_resistance[-1] if nearby_resistance else technical.resistance_levels[-1]
             else:
                 target = current_price * 1.15  # 默认15%上涨空间
-            
+
+            # 止损为最近支撑位（最接近当前价且低于当前价的支撑位）
             if technical.support_levels:
-                stop_loss = technical.support_levels[-1]
+                # 支撑位按升序排列，取最接近当前价的（即小于当前价的最大支撑位）
+                nearby_support = [s for s in technical.support_levels if s < current_price]
+                stop_loss = nearby_support[-1] if nearby_support else technical.support_levels[0]
             else:
                 stop_loss = current_price * 0.93  # 默认7%止损
-                
+
         elif direction in [Signal.SELL, Signal.STRONG_SELL]:
-            # 卖出：目标为最近支撑位，止损为最近阻力位
+            # 卖出：目标为最近支撑位（最接近当前价且低于当前价的支撑位）
             if technical.support_levels:
-                target = technical.support_levels[-1]
+                nearby_support = [s for s in technical.support_levels if s < current_price]
+                target = nearby_support[-1] if nearby_support else technical.support_levels[0]
             else:
                 target = current_price * 0.85  # 默认15%下跌空间
-            
+
+            # 止损为最近阻力位（最接近当前价且高于当前价的阻力位）
             if technical.resistance_levels:
-                stop_loss = technical.resistance_levels[0]
+                nearby_resistance = [r for r in technical.resistance_levels if r > current_price]
+                stop_loss = nearby_resistance[-1] if nearby_resistance else technical.resistance_levels[-1]
             else:
                 stop_loss = current_price * 1.07  # 默认7%止损
         else:
             target = None
             stop_loss = None
-        
+
         return round(entry, 2), round(target, 2) if target else None, round(stop_loss, 2) if stop_loss else None
     
     def _calculate_risk_reward(
         self,
         entry: Optional[float],
         target: Optional[float],
-        stop_loss: Optional[float]
+        stop_loss: Optional[float],
+        direction: Optional[Signal] = None
     ) -> tuple:
-        """计算风险收益比"""
+        """
+        计算风险收益比
+
+        Args:
+            entry: 入场价
+            target: 目标价
+            stop_loss: 止损价
+            direction: 交易方向（用于正确计算预期收益）
+
+        Returns:
+            (预期收益率%, 风险收益比)
+        """
         if not all([entry, target, stop_loss]):
             return None, None
-        
+
         potential_gain = abs(target - entry)
         potential_loss = abs(entry - stop_loss)
-        
-        expected_return = round((potential_gain / entry) * 100, 1)
+
+        # 预期收益：买入方向为正，卖出方向为负
+        if direction in [Signal.SELL, Signal.STRONG_SELL]:
+            expected_return = round(-1 * (potential_gain / entry) * 100, 1)
+        else:
+            expected_return = round((potential_gain / entry) * 100, 1)
+
         risk_reward = round(potential_gain / potential_loss, 2) if potential_loss > 0 else None
-        
+
         return expected_return, risk_reward
     
     def _determine_time_horizon(
@@ -289,7 +318,7 @@ class Trader(BaseAgent):
         
         # 新闻风险
         if news.risk_events:
-            risks.extend([f"风险事件: {e[:30]}..." for e in news.risk_events[:2]])
+            risks.extend([f"风险事件[{e.get('level', '未知')}]: {e.get('title', '')[:30]}" for e in news.risk_events[:2]])
         
         # 技术面风险
         if technical.trend == "下降趋势":
