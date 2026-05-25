@@ -44,8 +44,8 @@ env/
 config.yaml
 !config.yaml.example
 
-# Data
-data/
+# Data (only root-level data directory)
+/data/
 *.csv
 *.xlsx
 *.db

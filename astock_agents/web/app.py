@@ -140,12 +140,28 @@ async def root(request: Request):
 
 @app.get("/api/health")
 async def health_check(request: Request):
-    """健康检查 - 不限流"""
+    """健康检查 - 包含断路器状态"""
+    from astock_agents.data.circuit_breaker import get_all_circuit_breaker_stats
+
+    cb_stats = get_all_circuit_breaker_stats()
+    open_breakers = [name for name, stats in cb_stats.items() if stats["state"] == "OPEN"]
+    healthy = len(open_breakers) == 0
+
     return {
-        "status": "healthy",
+        "status": "healthy" if healthy else "degraded",
         "timestamp": datetime.now().isoformat(),
         "workflow_ready": _workflow is not None,
+        "circuit_breakers": cb_stats,
+        "open_breakers": open_breakers,
     }
+
+
+@app.get("/api/system/circuit-breakers")
+@limiter.limit("30/minute")
+async def get_circuit_breakers(request: Request):
+    """获取所有断路器状态"""
+    from astock_agents.data.circuit_breaker import get_all_circuit_breaker_stats
+    return {"circuit_breakers": get_all_circuit_breaker_stats()}
 
 
 # ==================== 认证API ====================
