@@ -13,6 +13,25 @@ from astock_agents.models.analysis_report import (
     Signal,
     RiskLevel,
 )
+from astock_agents.models.portfolio import (
+    WatchlistGroup,
+    WatchlistItem,
+    WatchlistGroupInfo,
+    ScreenerCondition,
+    ScreenerConditionType,
+    ScreenerOperator,
+    ScreenerPreset,
+    ScreenerResult,
+    ScreenerResponse,
+    TradeDirection,
+    TradeStatus,
+    OrderType,
+    TradeOrder,
+    Position,
+    Portfolio,
+    TradeRecord,
+    ReviewReport,
+)
 
 __all__ = [
     "StockData",
@@ -28,4 +47,22 @@ __all__ = [
     "RiskAssessment",
     "Signal",
     "RiskLevel",
+    # Portfolio models
+    "WatchlistGroup",
+    "WatchlistItem",
+    "WatchlistGroupInfo",
+    "ScreenerCondition",
+    "ScreenerConditionType",
+    "ScreenerOperator",
+    "ScreenerPreset",
+    "ScreenerResult",
+    "ScreenerResponse",
+    "TradeDirection",
+    "TradeStatus",
+    "OrderType",
+    "TradeOrder",
+    "Position",
+    "Portfolio",
+    "TradeRecord",
+    "ReviewReport",
 ]

@@ -1,19 +1,26 @@
 """
 AStockAgents Web界面
 
-基于FastAPI + Vue.js的交互式分析界面
+基于FastAPI的交互式分析界面，接入核心工作流引擎
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, Field
+from typing import Optional, Dict, Any, List
 from datetime import datetime
-import asyncio
-import json
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 import os
+import yaml
+import asyncio
+from loguru import logger
+
+# 创建限流器实例
+limiter = Limiter(key_func=get_remote_address)
 
 # 创建FastAPI应用
 app = FastAPI(
@@ -22,264 +29,196 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS配置
+# 将限流器绑定到应用状态
+app.state.limiter = limiter
+
+
+# 限流超出异常处理器
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    """处理限流超出异常，返回429状态码"""
+    return JSONResponse(
+        status_code=429,
+        content={
+            "detail": "请求过于频繁，请稍后再试",
+            "retry_after": exc.detail,
+        },
+    )
+
+
+# CORS配置 - 收紧为合理范围
+ALLOWED_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:3000,http://localhost:8000").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+# 延迟初始化工作流（避免导入时连接数据源）
+_workflow = None
+
+
+def _load_config() -> Dict[str, Any]:
+    """加载配置文件"""
+    config_path = os.environ.get("ASTOCK_CONFIG", "config.yaml")
+    if os.path.exists(config_path):
+        with open(config_path, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    return {}
+
+
+def _get_workflow():
+    """懒加载工作流实例"""
+    global _workflow
+    if _workflow is None:
+        try:
+            from astock_agents.workflow.analysis_workflow import AnalysisWorkflow
+            config = _load_config()
+            _workflow = AnalysisWorkflow(config=config)
+            logger.info("[Web] 工作流引擎初始化完成")
+        except Exception as e:
+            logger.error(f"[Web] 工作流引擎初始化失败: {e}")
+            raise
+    return _workflow
 
 
 # ==================== 数据模型 ====================
 
 class AnalysisRequest(BaseModel):
     """分析请求"""
-    stock_code: str
-    stock_name: Optional[str] = None
-    days: Optional[int] = 120
+    stock_code: str = Field(..., description="股票代码，如 600519.SH")
+    stock_name: Optional[str] = Field(None, description="股票名称")
+    days: Optional[int] = Field(120, description="分析天数")
 
 
 class AnalysisResponse(BaseModel):
     """分析响应"""
     stock_code: str
     stock_name: str
-    technical_analysis: Dict[str, Any]
-    fundamental_analysis: Dict[str, Any]
-    sentiment_analysis: Dict[str, Any]
-    risk_assessment: Dict[str, Any]
-    final_decision: Dict[str, Any]
+    current_price: Optional[float] = None
+    final_signal: Optional[str] = None
+    final_confidence: Optional[int] = None
+    technical_analysis: Optional[Dict[str, Any]] = None
+    fundamental_analysis: Optional[Dict[str, Any]] = None
+    sentiment_analysis: Optional[Dict[str, Any]] = None
+    news_analysis: Optional[Dict[str, Any]] = None
+    debate: Optional[Dict[str, Any]] = None
+    trade_proposal: Optional[Dict[str, Any]] = None
+    risk_assessment: Optional[Dict[str, Any]] = None
+    price_data: Optional[List[Dict[str, Any]]] = None
+    full_report: Optional[str] = None
     timestamp: str
-
-
-# ==================== 模拟数据生成 ====================
-
-def generate_mock_data(stock_code: str, stock_name: str, days: int = 120):
-    """生成模拟股票数据"""
-    import numpy as np
-    np.random.seed(hash(stock_code) % 2**32)
-    
-    # 基础价格设置
-    if "茅台" in stock_name:
-        base_price, volatility = 1800.0, 30.0
-    elif "五粮液" in stock_name:
-        base_price, volatility = 150.0, 5.0
-    elif "银行" in stock_name:
-        base_price, volatility = 10.0, 0.5
-    else:
-        base_price, volatility = 50.0, 3.0
-    
-    prices = []
-    trend_factor = np.random.choice([-1, 1]) * np.random.uniform(0.1, 0.3)
-    
-    for i in range(days):
-        trend = i * trend_factor
-        cycle = np.sin(i * 0.1) * volatility
-        noise = np.random.normal(0, volatility * 0.3)
-        close = base_price + trend + cycle + noise
-        
-        prices.append({
-            "date": (datetime(2024, 1, 1) + __import__('datetime').timedelta(days=i)).strftime('%Y-%m-%d'),
-            "open": round(close + np.random.normal(0, volatility * 0.1), 2),
-            "high": round(close + abs(np.random.normal(0, volatility * 0.2)), 2),
-            "low": round(close - abs(np.random.normal(0, volatility * 0.2)), 2),
-            "close": round(close, 2),
-            "volume": int(1000000 + np.random.exponential(500000))
-        })
-    
-    return prices
-
-
-def analyze_stock(stock_code: str, stock_name: str, days: int = 120) -> Dict[str, Any]:
-    """执行股票分析"""
-    from datetime import datetime, timedelta
-    import numpy as np
-    
-    # 生成价格数据
-    prices = generate_mock_data(stock_code, stock_name, days)
-    
-    # 计算技术指标
-    closes = [p['close'] for p in prices]
-    volumes = [p['volume'] for p in prices]
-    
-    # 简单移动平均
-    ma5 = sum(closes[-5:]) / 5
-    ma10 = sum(closes[-10:]) / 10
-    ma20 = sum(closes[-20:]) / 20
-    
-    # RSI (简化)
-    deltas = [closes[i] - closes[i-1] for i in range(1, len(closes))]
-    gains = [d if d > 0 else 0 for d in deltas[-14:]]
-    losses = [-d if d < 0 else 0 for d in deltas[-14:]]
-    avg_gain = sum(gains) / 14
-    avg_loss = sum(losses) / 14
-    rs = avg_gain / (avg_loss + 1e-10)
-    rsi = 100 - (100 / (1 + rs))
-    
-    # MACD (简化)
-    ema12 = sum(closes[-12:]) / 12
-    ema26 = sum(closes[-26:]) / 26
-    dif = ema12 - ema26
-    
-    # 趋势判断
-    if ma5 > ma10 > ma20:
-        trend = "上升趋势"
-        trend_strength = 70
-    elif ma5 < ma10 < ma20:
-        trend = "下降趋势"
-        trend_strength = 30
-    else:
-        trend = "震荡整理"
-        trend_strength = 50
-    
-    # 信号生成
-    score = 50
-    if rsi < 30:
-        score += 15
-    elif rsi > 70:
-        score -= 15
-    
-    if dif > 0:
-        score += 10
-    else:
-        score -= 10
-    
-    if trend == "上升趋势":
-        score += 10
-    elif trend == "下降趋势":
-        score -= 10
-    
-    # 确定信号
-    if score >= 65:
-        signal = "强烈买入"
-        action = "STRONG_BUY"
-    elif score >= 55:
-        signal = "买入"
-        action = "BUY"
-    elif score >= 45:
-        signal = "持有"
-        action = "HOLD"
-    elif score >= 35:
-        signal = "卖出"
-        action = "SELL"
-    else:
-        signal = "强烈卖出"
-        action = "STRONG_SELL"
-    
-    # 构建结果
-    current_price = closes[-1]
-    prev_price = closes[-2]
-    change_pct = (current_price - prev_price) / prev_price * 100
-    
-    return {
-        "stock_code": stock_code,
-        "stock_name": stock_name,
-        "current_price": round(current_price, 2),
-        "change_pct": round(change_pct, 2),
-        "technical_analysis": {
-            "trend": trend,
-            "trend_strength": trend_strength,
-            "signal": signal,
-            "confidence": abs(score - 50) * 2,
-            "indicators": {
-                "ma5": round(ma5, 2),
-                "ma10": round(ma10, 2),
-                "ma20": round(ma20, 2),
-                "rsi": round(rsi, 2),
-                "macd_dif": round(dif, 3)
-            },
-            "patterns": ["均线多头排列"] if ma5 > ma10 > ma20 else ["均线空头排列"] if ma5 < ma10 < ma20 else []
-        },
-        "fundamental_analysis": {
-            "valuation": "合理",
-            "profitability": "良好",
-            "growth": "稳定",
-            "pe_ttm": 35.0 if "茅台" in stock_name else 8.0,
-            "pb": 10.0 if "茅台" in stock_name else 0.6
-        },
-        "sentiment_analysis": {
-            "score": 55,
-            "state": "偏乐观",
-            "hot_topics": ["白酒板块", "消费复苏"]
-        },
-        "risk_assessment": {
-            "overall_risk": "中等",
-            "market_risk": "中等",
-            "liquidity_risk": "低",
-            "suggestions": ["建议分批建仓", "设置止损位"]
-        },
-        "final_decision": {
-            "score": round(score, 1),
-            "signal": signal,
-            "action": action,
-            "recommendation": f"建议{signal}" if signal != "持有" else "建议观望"
-        },
-        "price_data": prices[-60:],  # 最近60天数据
-        "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    }
 
 
 # ==================== API路由 ====================
 
 @app.get("/", response_class=HTMLResponse)
-async def root():
+@limiter.limit("30/minute")
+async def root(request: Request):
     """返回主页"""
     html_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
     if os.path.exists(html_path):
-        with open(html_path, 'r', encoding='utf-8') as f:
+        with open(html_path, "r", encoding="utf-8") as f:
             return f.read()
-    else:
-        return """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>AStockAgents</title>
-            <meta charset="utf-8">
-        </head>
-        <body>
-            <h1>AStockAgents Web界面</h1>
-            <p>请访问 <a href="/api/docs">/api/docs</a> 查看API文档</p>
-            <p>或使用 <a href="/analyze?stock_code=600519.SH&stock_name=贵州茅台">/analyze</a> 进行分析</p>
-        </body>
-        </html>
-        """
+    return HTMLResponse(
+        "<h1>AStockAgents</h1>"
+        "<p>API文档: <a href='/docs'>/docs</a></p>"
+        "<p>分析接口: POST /api/analyze</p>"
+    )
 
 
 @app.get("/api/health")
-async def health_check():
-    """健康检查"""
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+async def health_check(request: Request):
+    """健康检查 - 不限流"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "workflow_ready": _workflow is not None,
+    }
+
+
+@app.post("/api/analyze", response_model=AnalysisResponse)
+@limiter.limit("5/minute")
+async def analyze_stock(request: Request, body: AnalysisRequest):
+    """
+    分析股票 - 调用核心工作流引擎
+
+    执行完整的多智能体协同分析流程
+    限流: 每分钟5次请求
+    """
+    try:
+        workflow = _get_workflow()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"工作流引擎不可用: {str(e)}")
+
+    try:
+        # 在线程池中执行同步的工作流分析，避免阻塞事件循环
+        loop = asyncio.get_event_loop()
+        report = await loop.run_in_executor(
+            None,
+            lambda: workflow.analyze(
+                stock_code=body.stock_code,
+                stock_name=body.stock_name
+            )
+        )
+
+        # 构建响应
+        # 提取价格数据用于K线图
+        price_data = None
+        if report.technical and hasattr(report, 'stock_data_ref'):
+            stock_ref = report.stock_data_ref
+            if stock_ref and stock_ref.prices:
+                price_data = [
+                    {
+                        "date": p.date.strftime("%Y-%m-%d"),
+                        "open": p.open,
+                        "high": p.high,
+                        "low": p.low,
+                        "close": p.close,
+                        "volume": p.volume,
+                    }
+                    for p in stock_ref.prices[-120:]
+                ]
+
+        response = AnalysisResponse(
+            stock_code=report.stock_code,
+            stock_name=report.stock_name,
+            current_price=report.current_price,
+            final_signal=report.final_signal.value if report.final_signal else None,
+            final_confidence=report.final_confidence,
+            technical_analysis=report.technical.model_dump() if report.technical else None,
+            fundamental_analysis=report.fundamental.model_dump() if report.fundamental else None,
+            sentiment_analysis=report.sentiment.model_dump() if report.sentiment else None,
+            news_analysis=report.news.model_dump() if report.news else None,
+            debate=report.debate.model_dump() if report.debate else None,
+            trade_proposal=report.trade_proposal.model_dump() if report.trade_proposal else None,
+            risk_assessment=report.risk_assessment.model_dump() if report.risk_assessment else None,
+            price_data=price_data,
+            full_report=report.full_report,
+            timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        )
+
+        return response
+
+    except Exception as e:
+        logger.error(f"[Web] 分析失败: {body.stock_code}, {e}")
+        raise HTTPException(status_code=500, detail=f"分析失败: {str(e)}")
 
 
 @app.get("/api/analyze")
-async def analyze_get(stock_code: str, stock_name: Optional[str] = None, days: int = 120):
-    """GET方式分析股票"""
-    if not stock_name:
-        stock_name = stock_code
-    
-    try:
-        result = analyze_stock(stock_code, stock_name, days)
-        return JSONResponse(content=result)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/analyze")
-async def analyze_post(request: AnalysisRequest):
-    """POST方式分析股票"""
-    stock_name = request.stock_name or request.stock_code
-    
-    try:
-        result = analyze_stock(request.stock_code, stock_name, request.days)
-        return JSONResponse(content=result)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@limiter.limit("5/minute")
+async def analyze_stock_get(request: Request, stock_code: str, stock_name: Optional[str] = None):
+    """GET方式分析股票（便捷接口） - 限流: 每分钟5次"""
+    body = AnalysisRequest(stock_code=stock_code, stock_name=stock_name)
+    return await analyze_stock(request, body)
 
 
 @app.get("/api/stocks/popular")
-async def get_popular_stocks():
-    """获取热门股票列表"""
+@limiter.limit("30/minute")
+async def get_popular_stocks(request: Request):
+    """获取热门股票列表 - 限流: 每分钟30次"""
     return {
         "stocks": [
             {"code": "600519.SH", "name": "贵州茅台", "industry": "白酒"},
@@ -292,32 +231,207 @@ async def get_popular_stocks():
     }
 
 
-@app.get("/api/compare")
-async def compare_stocks(stock_codes: str):
-    """对比多只股票"""
-    codes = stock_codes.split(",")
-    results = []
-    
-    stock_names = {
-        "600519.SH": "贵州茅台",
-        "000858.SZ": "五粮液",
-        "000001.SZ": "平安银行",
-        "600036.SH": "招商银行",
-    }
-    
-    for code in codes[:5]:  # 最多5只
-        name = stock_names.get(code, code)
-        result = analyze_stock(code, name, 60)
-        results.append({
-            "stock_code": code,
-            "stock_name": name,
-            "current_price": result["current_price"],
-            "change_pct": result["change_pct"],
-            "signal": result["final_decision"]["signal"],
-            "score": result["final_decision"]["score"]
-        })
-    
-    return {"results": results}
+# ==================== 投资系统API ====================
+
+# 全局服务实例
+_screener = None
+_watchlist = None
+_paper_trading = None
+_review = None
+
+
+def _get_screener():
+    """懒加载选股器"""
+    global _screener
+    if _screener is None:
+        from astock_agents.services.screener import StockScreener
+        _screener = StockScreener()
+    return _screener
+
+
+def _get_watchlist():
+    """懒加载自选股管理器"""
+    global _watchlist
+    if _watchlist is None:
+        from astock_agents.services.watchlist import WatchlistManager
+        _watchlist = WatchlistManager()
+    return _watchlist
+
+
+def _get_paper_trading():
+    """懒加载模拟交易"""
+    global _paper_trading
+    if _paper_trading is None:
+        from astock_agents.services.paper_trading import PaperTradingService
+        _paper_trading = PaperTradingService()
+    return _paper_trading
+
+
+def _get_review():
+    """懒加载复盘服务"""
+    global _review
+    if _review is None:
+        from astock_agents.services.review import ReviewService
+        _review = ReviewService()
+    return _review
+
+
+# ---------- 选股器 ----------
+
+@app.get("/api/screener/presets")
+@limiter.limit("30/minute")
+async def get_screener_presets(request: Request):
+    """获取选股预设方案列表"""
+    screener = _get_screener()
+    presets = screener.get_presets()
+    return {"presets": [p.model_dump() for p in presets]}
+
+
+@app.post("/api/screener/scan")
+@limiter.limit("5/minute")
+async def screener_scan(request: Request, body: Optional[Dict[str, Any]] = None):
+    """执行选股扫描"""
+    screener = _get_screener()
+    body = body or {}
+
+    preset_name = body.get("preset_name")
+    conditions = body.get("conditions")
+
+    if conditions:
+        from astock_agents.models.portfolio import ScreenerCondition
+        conditions = [ScreenerCondition(**c) for c in conditions]
+
+    result = screener.scan(preset_name=preset_name, conditions=conditions)
+    return result.model_dump()
+
+
+# ---------- 自选股 ----------
+
+@app.get("/api/watchlist")
+@limiter.limit("30/minute")
+async def get_watchlist(request: Request, group: Optional[str] = None):
+    """获取自选股列表"""
+    wl = _get_watchlist()
+    from astock_agents.models.portfolio import WatchlistGroup
+    group_enum = None
+    if group:
+        try:
+            group_enum = WatchlistGroup(group)
+        except ValueError:
+            pass
+    items = wl.get_all(group=group_enum)
+    return {"items": [i.model_dump() for i in items], "total": len(items)}
+
+
+@app.post("/api/watchlist/add")
+@limiter.limit("10/minute")
+async def add_to_watchlist(request: Request, body: Dict[str, Any]):
+    """添加自选股"""
+    from astock_agents.models.portfolio import WatchlistItem
+    wl = _get_watchlist()
+    item = WatchlistItem(**body)
+    success = wl.add(item)
+    if not success:
+        raise HTTPException(status_code=409, detail="该股票已在自选列表中")
+    return {"success": True, "message": f"已添加 {item.stock_name}"}
+
+
+@app.delete("/api/watchlist/{stock_code}")
+@limiter.limit("10/minute")
+async def remove_from_watchlist(request: Request, stock_code: str):
+    """移除自选股"""
+    wl = _get_watchlist()
+    success = wl.remove(stock_code)
+    if not success:
+        raise HTTPException(status_code=404, detail="未找到该股票")
+    return {"success": True}
+
+
+@app.get("/api/watchlist/groups")
+@limiter.limit("30/minute")
+async def get_watchlist_groups(request: Request):
+    """获取自选股分组"""
+    wl = _get_watchlist()
+    groups = wl.get_groups()
+    return {"groups": [g.model_dump() for g in groups]}
+
+
+# ---------- 模拟交易 ----------
+
+@app.get("/api/trading/portfolio")
+@limiter.limit("30/minute")
+async def get_portfolio(request: Request):
+    """获取投资组合"""
+    pt = _get_paper_trading()
+    portfolio = pt.get_portfolio()
+    return portfolio.model_dump()
+
+
+@app.post("/api/trading/order")
+@limiter.limit("10/minute")
+async def place_order(request: Request, body: Dict[str, Any]):
+    """下单"""
+    from astock_agents.models.portfolio import TradeDirection, OrderType
+    pt = _get_paper_trading()
+
+    try:
+        direction = TradeDirection(body.get("direction", "买入"))
+        order_type = OrderType(body.get("order_type", "市价单"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"参数错误: {e}")
+
+    order = pt.place_order(
+        stock_code=body.get("stock_code", ""),
+        stock_name=body.get("stock_name", ""),
+        direction=direction,
+        quantity=body.get("quantity", 100),
+        order_type=order_type,
+        price=body.get("price"),
+        reason=body.get("reason"),
+        signal_source=body.get("signal_source"),
+    )
+
+    if order.status.value == "已取消":
+        raise HTTPException(status_code=400, detail="下单失败：资金不足或持仓不足")
+
+    return order.model_dump()
+
+
+@app.get("/api/trading/orders")
+@limiter.limit("30/minute")
+async def get_orders(request: Request, limit: int = 50):
+    """获取交易订单"""
+    pt = _get_paper_trading()
+    orders = pt.get_orders(limit=limit)
+    return {"orders": [o.model_dump() for o in orders]}
+
+
+@app.get("/api/trading/history")
+@limiter.limit("30/minute")
+async def get_trade_history(request: Request):
+    """获取交易历史"""
+    pt = _get_paper_trading()
+    return {"history": pt.get_trade_history()}
+
+
+# ---------- 交易复盘 ----------
+
+@app.get("/api/review/report")
+@limiter.limit("10/minute")
+async def get_review_report(request: Request, period: Optional[str] = None):
+    """获取复盘报告"""
+    review = _get_review()
+    report = review.generate_report(period=period)
+    return report.model_dump()
+
+
+@app.get("/api/review/records")
+@limiter.limit("30/minute")
+async def get_review_records(request: Request, status: Optional[str] = None):
+    """获取交易记录"""
+    review = _get_review()
+    records = review.get_records(status=status)
+    return {"records": [r.model_dump() for r in records]}
 
 
 # ==================== 启动函数 ====================
