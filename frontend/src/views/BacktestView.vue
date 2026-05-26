@@ -87,21 +87,21 @@ async function handleRun() {
       <div class="params-grid">
         <div class="form-field">
           <label class="field-label">仓位比例 (%)</label>
-          <input v-model.number="form.position_size_pct" type="number" class="input" min="5" max="100" step="5"
+          <input type="number" class="input" min="5" max="100" step="5"
             :value="(form.position_size_pct! * 100).toFixed(0)"
             @input="form.position_size_pct = ($event.target as HTMLInputElement).valueAsNumber / 100"
           />
         </div>
         <div class="form-field">
           <label class="field-label">止损 (%)</label>
-          <input v-model.number="form.stop_loss_pct" type="number" class="input" min="1" max="20" step="1"
+          <input type="number" class="input" min="1" max="20" step="1"
             :value="(form.stop_loss_pct! * 100).toFixed(0)"
             @input="form.stop_loss_pct = ($event.target as HTMLInputElement).valueAsNumber / 100"
           />
         </div>
         <div class="form-field">
           <label class="field-label">止盈 (%)</label>
-          <input v-model.number="form.take_profit_pct" type="number" class="input" min="5" max="50" step="5"
+          <input type="number" class="input" min="5" max="50" step="5"
             :value="(form.take_profit_pct! * 100).toFixed(0)"
             @input="form.take_profit_pct = ($event.target as HTMLInputElement).valueAsNumber / 100"
           />

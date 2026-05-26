@@ -526,3 +526,117 @@ export async function getSectorHeatmap(): Promise<{
 }> {
   return request('/api/sector/heatmap')
 }
+
+// ==================== 决策系统 API ====================
+
+/** 获取待执行决策列表 - GET /api/decisions/pending */
+export async function getPendingDecisions(): Promise<any> {
+  return request('/api/decisions/pending')
+}
+
+/** 获取决策历史 - GET /api/decisions/history */
+export async function getDecisionHistory(stockCode?: string, limit: number = 50): Promise<any> {
+  const params = new URLSearchParams()
+  if (stockCode) params.set('stock_code', stockCode)
+  params.set('limit', String(limit))
+  return request(`/api/decisions/history?${params.toString()}`)
+}
+
+/** 执行决策 - POST /api/decisions/{decisionId}/execute */
+export async function executeDecision(decisionId: string): Promise<any> {
+  return request(`/api/decisions/${decisionId}/execute`, { method: 'POST' })
+}
+
+/** 取消决策 - POST /api/decisions/{decisionId}/cancel */
+export async function cancelDecision(decisionId: string, reason: string = ''): Promise<any> {
+  return request(`/api/decisions/${decisionId}/cancel`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  })
+}
+
+/** 复盘决策 - POST /api/decisions/{decisionId}/review */
+export async function reviewDecision(decisionId: string, outcome: string, actualPnl: number): Promise<any> {
+  return request(`/api/decisions/${decisionId}/review`, {
+    method: 'POST',
+    body: JSON.stringify({ outcome, actual_pnl: actualPnl }),
+  })
+}
+
+// ==================== 调度器 API ====================
+
+/** 获取调度器状态 - GET /api/scheduler/status */
+export async function getSchedulerStatus(): Promise<any> {
+  return request('/api/scheduler/status')
+}
+
+/** 启动调度器 - POST /api/scheduler/start */
+export async function startScheduler(): Promise<any> {
+  return request('/api/scheduler/start', { method: 'POST' })
+}
+
+/** 停止调度器 - POST /api/scheduler/stop */
+export async function stopScheduler(): Promise<any> {
+  return request('/api/scheduler/stop', { method: 'POST' })
+}
+
+// ==================== 通知 API ====================
+
+/** 获取通知历史 - GET /api/notifications/history */
+export async function getNotificationHistory(limit: number = 20): Promise<any> {
+  return request(`/api/notifications/history?limit=${limit}`)
+}
+
+/** 获取通知渠道 - GET /api/notifications/channels */
+export async function getNotificationChannels(): Promise<any> {
+  return request('/api/notifications/channels')
+}
+
+/** 测试通知 - POST /api/notifications/test */
+export async function testNotification(): Promise<any> {
+  return request('/api/notifications/test', { method: 'POST' })
+}
+
+// ==================== 资金流向 API ====================
+
+/** 分析资金流向 - POST /api/capital-flow/analyze */
+export async function analyzeCapitalFlow(stockCode: string, stockName: string = ''): Promise<any> {
+  return request('/api/capital-flow/analyze', {
+    method: 'POST',
+    body: JSON.stringify({ stock_code: stockCode, stock_name: stockName }),
+  })
+}
+
+// ==================== 市场情绪 API ====================
+
+/** 获取市场情绪 - GET /api/market/sentiment */
+export async function getMarketSentiment(): Promise<any> {
+  return request('/api/market/sentiment')
+}
+
+// ==================== 仓位计算 API ====================
+
+/** 仓位计算请求参数 */
+export interface PositionSizingParams {
+  signal: string
+  confidence: number
+  risk_level: string
+  portfolio_value: number
+  stop_loss_pct: number
+  stock_code?: string
+}
+
+/** 计算仓位 - POST /api/position-sizing */
+export async function calculatePositionSizing(params: PositionSizingParams): Promise<any> {
+  return request('/api/position-sizing', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+}
+
+// ==================== WebSocket 状态 API ====================
+
+/** 获取 WebSocket 状态 - GET /api/ws/status */
+export async function getWebSocketStatus(): Promise<any> {
+  return request('/api/ws/status')
+}

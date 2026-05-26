@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
-import * as echarts from 'echarts'
+import * as echarts from 'echarts/core'
+import { HeatmapChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent, VisualMapComponent, TitleComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+
+echarts.use([HeatmapChart, GridComponent, TooltipComponent, VisualMapComponent, TitleComponent, CanvasRenderer])
 import {
   getSectorRotation,
   type SectorRotationResult,
@@ -117,7 +122,7 @@ function updateChart(): void {
 
   const maxRow = Math.ceil(sorted.length / cols)
 
-  const option: echarts.EChartsOption = {
+  const option: echarts.EChartsCoreOption = {
     backgroundColor: 'transparent',
     tooltip: {
       formatter: (params: unknown) => {
