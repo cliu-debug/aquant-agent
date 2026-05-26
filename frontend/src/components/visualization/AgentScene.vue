@@ -3,9 +3,9 @@
     <canvas ref="canvasRef"></canvas>
 
     <div class="scene-hints">
-      <span>🖱️ 拖拽旋转</span>
-      <span>🔍 滚轮缩放</span>
-      <span>👆 点击智能体查看详情</span>
+      <span>拖拽旋转</span>
+      <span>滚轮缩放</span>
+      <span>点击智能体查看详情</span>
     </div>
 
     <Transition name="fade">
@@ -561,10 +561,10 @@ onUnmounted(() => {
   position: relative;
   width: 100%;
   height: 500px;
-  background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
-  border-radius: 16px;
+  background: var(--color-bg-primary);
+  border-radius: var(--radius);
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--color-border);
 }
 
 .agent-scene canvas {
@@ -575,29 +575,29 @@ onUnmounted(() => {
 
 .scene-hints {
   position: absolute;
-  bottom: 16px;
+  bottom: 12px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
   gap: 16px;
   font-size: 12px;
-  color: #64748b;
+  color: var(--color-text-muted);
   background: rgba(0, 0, 0, 0.5);
-  padding: 8px 16px;
-  border-radius: 20px;
+  padding: 6px 14px;
+  border-radius: 2px;
   pointer-events: none;
   user-select: none;
 }
 
 .agent-detail-panel {
   position: absolute;
-  top: 16px;
-  right: 16px;
-  width: 280px;
-  background: rgba(30, 41, 59, 0.95);
+  top: 12px;
+  right: 12px;
+  width: 260px;
+  background: rgba(20, 24, 39, 0.95);
   backdrop-filter: blur(12px);
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
   overflow: hidden;
   z-index: 10;
 }

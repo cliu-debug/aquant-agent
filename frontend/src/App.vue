@@ -6,11 +6,44 @@ const router = useRouter()
 const route = useRoute()
 const sidebarCollapsed = ref(false)
 
+/** 导航项配置 - SVG 图标 + 文字 */
 const navItems = [
-  { path: '/', name: 'analysis', icon: '🤖', label: '智能体分析' },
-  { path: '/watchlist', name: 'watchlist', icon: '⭐', label: '自选股' },
-  { path: '/trading', name: 'trading', icon: '💰', label: '模拟交易' },
-  { path: '/backtest', name: 'backtest', icon: '📊', label: '策略回测' },
+  {
+    path: '/',
+    name: 'analysis',
+    label: '智能体分析',
+    icon: 'analysis',
+  },
+  {
+    path: '/screener',
+    name: 'screener',
+    label: '选股',
+    icon: 'screener',
+  },
+  {
+    path: '/watchlist',
+    name: 'watchlist',
+    label: '自选股',
+    icon: 'watchlist',
+  },
+  {
+    path: '/trading',
+    name: 'trading',
+    label: '模拟交易',
+    icon: 'trading',
+  },
+  {
+    path: '/backtest',
+    name: 'backtest',
+    label: '策略回测',
+    icon: 'backtest',
+  },
+  {
+    path: '/tracker',
+    name: 'tracker',
+    label: '追踪中心',
+    icon: 'tracker',
+  },
 ]
 
 const currentNav = computed(() => route.name as string)
@@ -26,10 +59,16 @@ function navigateTo(path: string) {
     <aside class="sidebar" :class="{ collapsed: sidebarCollapsed }">
       <div class="sidebar-header">
         <div class="logo" v-if="!sidebarCollapsed">
-          <span class="logo-icon">🤖</span>
+          <svg class="logo-icon" width="24" height="24" viewBox="0 0 24 24" fill="none">
+            <rect x="2" y="3" width="20" height="18" rx="2" stroke="#2563EB" stroke-width="1.5"/>
+            <path d="M6 15L9 10L12 13L15 8L18 12" stroke="#2563EB" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
           <span class="logo-text">AStock<span class="logo-accent">Agents</span></span>
         </div>
-        <span v-else class="logo-icon-only">🤖</span>
+        <svg v-else class="logo-icon-only" width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <rect x="2" y="3" width="20" height="18" rx="2" stroke="#2563EB" stroke-width="1.5"/>
+          <path d="M6 15L9 10L12 13L15 8L18 12" stroke="#2563EB" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
       </div>
 
       <nav class="sidebar-nav">
@@ -41,13 +80,39 @@ function navigateTo(path: string) {
           @click="navigateTo(item.path)"
           :title="item.label"
         >
-          <span class="nav-icon">{{ item.icon }}</span>
+          <!-- 智能体分析 -->
+          <svg v-if="item.icon === 'analysis'" class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+          </svg>
+          <!-- 选股 -->
+          <svg v-else-if="item.icon === 'screener'" class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 4h16v16H4z"/><path d="M9 9h6M9 13h4"/>
+          </svg>
+          <!-- 自选股 -->
+          <svg v-else-if="item.icon === 'watchlist'" class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.27 5.82 21 7 14.14l-5-4.87 6.91-1.01L12 2z"/>
+          </svg>
+          <!-- 模拟交易 -->
+          <svg v-else-if="item.icon === 'trading'" class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/>
+          </svg>
+          <!-- 策略回测 -->
+          <svg v-else-if="item.icon === 'backtest'" class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 3v18h18"/><path d="M7 16l4-6 4 4 5-8"/>
+          </svg>
+          <!-- 追踪中心 -->
+          <svg v-else-if="item.icon === 'tracker'" class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+          </svg>
           <span class="nav-label" v-if="!sidebarCollapsed">{{ item.label }}</span>
         </button>
       </nav>
 
       <button class="sidebar-toggle" @click="sidebarCollapsed = !sidebarCollapsed">
-        {{ sidebarCollapsed ? '→' : '←' }}
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline v-if="sidebarCollapsed" points="9 18 15 12 9 6"/>
+          <polyline v-else points="15 18 9 12 15 6"/>
+        </svg>
       </button>
     </aside>
 
@@ -62,30 +127,30 @@ function navigateTo(path: string) {
 .app-layout {
   display: flex;
   min-height: 100vh;
-  background: #0F172A;
+  background: var(--color-bg-primary);
 }
 
 .sidebar {
-  width: 220px;
-  background: #1E293B;
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  width: 200px;
+  background: var(--color-bg-card);
+  border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
-  transition: width 0.3s ease;
+  transition: width 0.2s ease;
   flex-shrink: 0;
 }
 
 .sidebar.collapsed {
-  width: 64px;
+  width: 56px;
 }
 
 .sidebar-header {
-  padding: 20px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 16px 12px;
+  border-bottom: 1px solid var(--color-border);
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 64px;
+  min-height: 56px;
 }
 
 .logo {
@@ -95,62 +160,58 @@ function navigateTo(path: string) {
 }
 
 .logo-icon {
-  font-size: 24px;
-}
-
-.logo-icon-only {
-  font-size: 24px;
+  flex-shrink: 0;
 }
 
 .logo-text {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
-  color: #F8FAFC;
+  color: var(--color-text-primary);
+  letter-spacing: -0.02em;
 }
 
 .logo-accent {
-  color: #3B82F6;
+  color: var(--color-accent);
 }
 
 .sidebar-nav {
   flex: 1;
-  padding: 12px 8px;
+  padding: 8px 6px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  border-radius: 10px;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
   border: none;
   background: transparent;
-  color: #94A3B8;
-  font-size: 14px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.15s ease;
   width: 100%;
   text-align: left;
 }
 
 .nav-item:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #F8FAFC;
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
 }
 
 .nav-item.active {
-  background: rgba(59, 130, 246, 0.15);
-  color: #3B82F6;
+  background: rgba(37, 99, 235, 0.1);
+  color: var(--color-accent);
 }
 
-.nav-icon {
-  font-size: 18px;
+.nav-svg {
   flex-shrink: 0;
-  width: 24px;
-  text-align: center;
+  width: 18px;
+  height: 18px;
 }
 
 .nav-label {
@@ -161,24 +222,26 @@ function navigateTo(path: string) {
 
 .sidebar.collapsed .nav-item {
   justify-content: center;
-  padding: 12px;
+  padding: 10px;
 }
 
 .sidebar-toggle {
-  margin: 12px;
+  margin: 8px;
   padding: 8px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--color-bg-hover);
   border: none;
-  border-radius: 8px;
-  color: #64748B;
+  border-radius: var(--radius);
+  color: var(--color-text-muted);
   cursor: pointer;
-  font-size: 14px;
-  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
 }
 
 .sidebar-toggle:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #F8FAFC;
+  background: var(--color-border);
+  color: var(--color-text-primary);
 }
 
 .main-content {
@@ -189,7 +252,7 @@ function navigateTo(path: string) {
 
 @media (max-width: 768px) {
   .sidebar {
-    width: 64px;
+    width: 56px;
   }
   .sidebar .nav-label {
     display: none;

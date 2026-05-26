@@ -62,7 +62,7 @@ function mapRiskLevel(riskData: Record<string, unknown> | null): RiskLevel {
 }
 
 /** 从后端分析结果提取智能体输出 */
-function extractAgentOutput(key: string, data: Record<string, unknown> | null): AgentOutput | null {
+function extractAgentOutput(_key: string, data: Record<string, unknown> | null): AgentOutput | null {
   if (!data) return null
   const summary = (data.summary as string) || (data.analysis as string) || JSON.stringify(data).substring(0, 200)
   const metrics: Record<string, number | string> = {}
@@ -82,7 +82,7 @@ function extractAgentOutput(key: string, data: Record<string, unknown> | null): 
 }
 
 /**
- * 启动股票分析 - 真正调用后端 API
+ * 启动股票分析 - 调用后端 API
  */
 async function startAnalysis(): Promise<void> {
   if (!stockCode.value.trim()) return
@@ -103,20 +103,17 @@ async function startAnalysis(): Promise<void> {
     })
 
     progressController.stop()
-
     completeAllAgents()
-
     updateAgentOutputs(response)
-
     setFinalResultFromResponse(response)
 
-    addSystemLog(`✅ ${response.stock_name} 分析完成！信号: ${response.final_signal || '未知'}`)
+    addSystemLog(`${response.stock_name} 分析完成，信号: ${response.final_signal || '未知'}`)
   } catch (err) {
     progressController.stop()
     const errorMessage = err instanceof Error ? err.message : '未知错误'
     analysisError.value = errorMessage
     store.isRunning = false
-    addSystemLog(`❌ 分析失败: ${errorMessage}`, LogLevel.ERROR)
+    addSystemLog(`分析失败: ${errorMessage}`, LogLevel.ERROR)
 
     store.agents.forEach((agent) => {
       if (agent.status === AgentStatus.RUNNING || agent.status === AgentStatus.INITIALIZING) {
@@ -128,7 +125,7 @@ async function startAnalysis(): Promise<void> {
 
 /**
  * 进度模拟控制器
- * 因为后端是同步执行的，前端需要模拟各阶段进度
+ * 后端同步执行，前端模拟各阶段进度
  */
 function startProgressSimulation(): { stop: () => void } {
   let stopped = false
@@ -282,7 +279,9 @@ function fillStock(code: string, name: string): void {
     <!-- 顶部搜索栏 -->
     <header class="search-header">
       <div class="search-box">
-        <span class="search-icon">🔍</span>
+        <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+        </svg>
         <input
           v-model="stockCode"
           type="text"
@@ -300,13 +299,10 @@ function fillStock(code: string, name: string): void {
           :disabled="isAnalyzing"
         />
         <button
-          class="analyze-btn"
-          :class="{ active: isAnalyzing }"
+          class="btn-primary analyze-btn"
           @click="startAnalysis"
           :disabled="isAnalyzing || !stockCode.trim()"
         >
-          <span v-if="isAnalyzing" class="btn-loading">⏳</span>
-          <span v-else>🚀</span>
           {{ isAnalyzing ? '分析中...' : '开始分析' }}
         </button>
       </div>
@@ -339,10 +335,10 @@ function fillStock(code: string, name: string): void {
     <!-- 3D 场景 -->
     <section class="scene-section" v-if="show3D">
       <AgentScene :agents="store.agents" />
-      <button class="toggle-3d-btn" @click="show3D = false">收起3D</button>
+      <button class="toggle-3d-btn" @click="show3D = false">收起</button>
     </section>
     <section v-else class="scene-collapsed">
-      <button class="toggle-3d-btn" @click="show3D = true">展开3D场景</button>
+      <button class="toggle-3d-btn" @click="show3D = true">展开场景</button>
     </section>
 
     <!-- 工作流进度 -->
@@ -373,9 +369,8 @@ function fillStock(code: string, name: string): void {
     <!-- 错误提示 -->
     <Transition name="fade">
       <div v-if="analysisError" class="error-banner">
-        <span class="error-icon">❌</span>
         <span class="error-text">{{ analysisError }}</span>
-        <button class="error-close" @click="analysisError = null">✕</button>
+        <button class="error-close" @click="analysisError = null">&times;</button>
       </div>
     </Transition>
   </div>
@@ -383,152 +378,123 @@ function fillStock(code: string, name: string): void {
 
 <style scoped>
 .analysis-view {
-  padding: 16px 24px;
+  padding: 16px 20px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   min-height: 100vh;
 }
 
 .search-header {
-  background: #1E293B;
-  border-radius: 16px;
-  padding: 16px 20px;
-  border: 1px solid rgba(255,255,255,0.06);
+  background: var(--color-bg-card);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  border: 1px solid var(--color-border);
 }
 
 .search-box {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: #334155;
-  border-radius: 12px;
-  padding: 4px 4px 4px 16px;
-  border: 1px solid rgba(255,255,255,0.1);
+  background: var(--color-bg-input);
+  border-radius: 2px;
+  padding: 2px 2px 2px 12px;
+  border: 1px solid var(--color-border);
   transition: border-color 0.2s;
 }
 
 .search-box:focus-within {
-  border-color: rgba(59,130,246,0.5);
+  border-color: var(--color-accent);
 }
 
-.search-icon { font-size: 14px; color: #64748B; }
+.search-icon {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
 
 .search-input {
   background: none;
   border: none;
-  color: #F8FAFC;
+  color: var(--color-text-primary);
   font-size: 14px;
   outline: none;
   width: 180px;
   padding: 8px 0;
 }
 
-.search-input::placeholder { color: #64748B; }
+.search-input::placeholder { color: var(--color-text-muted); }
 
 .name-input {
   width: 120px;
-  border-left: 1px solid rgba(255,255,255,0.1);
+  border-left: 1px solid var(--color-border);
   padding-left: 12px;
 }
 
 .analyze-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 20px;
-  background: linear-gradient(135deg, #3B82F6, #8B5CF6);
-  color: white;
-  border: none;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-  white-space: nowrap;
+  flex-shrink: 0;
 }
-
-.analyze-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 16px rgba(59,130,246,0.4);
-}
-
-.analyze-btn:disabled { opacity: 0.6; cursor: not-allowed; }
-.analyze-btn.active { background: linear-gradient(135deg, #F59E0B, #EAB308); }
-
-.btn-loading { animation: spin 1s linear infinite; display: inline-block; }
-@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
 .popular-stocks {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 12px;
+  margin-top: 10px;
   flex-wrap: wrap;
 }
 
-.popular-label { font-size: 12px; color: #64748B; }
+.popular-label { font-size: 12px; color: var(--color-text-muted); }
 
 .popular-tag {
-  padding: 4px 10px;
-  background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 6px;
-  color: #94A3B8;
+  padding: 3px 10px;
+  background: var(--color-bg-hover);
+  border: 1px solid var(--color-border);
+  border-radius: 2px;
+  color: var(--color-text-secondary);
   font-size: 12px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.15s;
 }
 
-.popular-tag:hover:not(:disabled) { border-color: #3B82F6; color: #3B82F6; }
+.popular-tag:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent); }
 .popular-tag:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.global-progress { padding: 8px 0; }
+.global-progress { padding: 6px 0; }
 .progress-info { display: flex; justify-content: space-between; margin-bottom: 4px; }
-.progress-label { font-size: 12px; color: #94A3B8; }
-.progress-value { font-size: 12px; color: #3B82F6; font-weight: 600; }
-.progress-bar { height: 3px; background: #334155; border-radius: 2px; overflow: hidden; }
+.progress-label { font-size: 12px; color: var(--color-text-secondary); }
+.progress-value { font-size: 12px; color: var(--color-accent); font-weight: 600; }
+.progress-bar { height: 2px; background: var(--color-bg-hover); border-radius: 1px; overflow: hidden; }
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #3B82F6, #8B5CF6, #EC4899, #3B82F6);
-  background-size: 300% 100%;
-  border-radius: 2px;
+  background: var(--color-accent);
+  border-radius: 1px;
   transition: width 0.5s ease;
-  animation: gradient-shift 3s ease infinite;
 }
-@keyframes gradient-shift { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
 
-.scene-section { position: relative; border-radius: 16px; overflow: hidden; border: 1px solid rgba(255,255,255,0.06); }
-.scene-collapsed { display: flex; justify-content: center; padding: 8px; }
+.scene-section { position: relative; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--color-border); }
+.scene-collapsed { display: flex; justify-content: center; padding: 6px; }
 .toggle-3d-btn {
-  position: absolute; top: 12px; right: 12px; z-index: 10;
-  padding: 6px 12px; background: rgba(0,0,0,0.5); backdrop-filter: blur(8px);
-  border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;
-  color: #94A3B8; font-size: 12px; cursor: pointer; transition: all 0.2s;
+  position: absolute; top: 8px; right: 8px; z-index: 10;
+  padding: 4px 10px; background: rgba(0,0,0,0.6); backdrop-filter: blur(8px);
+  border: 1px solid var(--color-border); border-radius: 2px;
+  color: var(--color-text-secondary); font-size: 12px; cursor: pointer; transition: all 0.15s;
 }
-.toggle-3d-btn:hover { background: rgba(0,0,0,0.7); color: #F8FAFC; }
-.scene-collapsed .toggle-3d-btn { position: static; background: #1E293B; }
+.toggle-3d-btn:hover { background: rgba(0,0,0,0.8); color: var(--color-text-primary); }
+.scene-collapsed .toggle-3d-btn { position: static; background: var(--color-bg-card); }
 
-.workflow-section { border-radius: 12px; overflow: hidden; }
+.workflow-section { border-radius: var(--radius); overflow: hidden; }
 
-.content-grid { display: grid; grid-template-columns: 1fr 1.5fr; gap: 16px; flex: 1; }
+.content-grid { display: grid; grid-template-columns: 1fr 1.5fr; gap: 12px; flex: 1; }
 .left-panel { min-width: 0; }
-.right-panel { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.agents-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.right-panel { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.agents-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 
 .error-banner {
   display: flex; align-items: center; gap: 12px;
-  padding: 12px 16px; background: rgba(239,68,68,0.1);
-  border: 1px solid rgba(239,68,68,0.3); border-radius: 12px;
+  padding: 10px 14px; background: rgba(245, 34, 45, 0.08);
+  border: 1px solid rgba(245, 34, 45, 0.2); border-radius: var(--radius);
 }
-.error-icon { font-size: 16px; flex-shrink: 0; }
-.error-text { flex: 1; color: #EF4444; font-size: 13px; }
-.error-close { background: none; border: none; color: #64748B; cursor: pointer; font-size: 14px; padding: 4px; }
-
-.fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease, transform 0.3s ease; }
-.fade-enter-from, .fade-leave-to { opacity: 0; transform: translateY(10px); }
-.slide-enter-active, .slide-leave-active { transition: opacity 0.3s ease, transform 0.3s ease; }
-.slide-enter-from, .slide-leave-to { opacity: 0; transform: translateX(20px); }
+.error-text { flex: 1; color: var(--color-negative); font-size: 13px; }
+.error-close { background: none; border: none; color: var(--color-text-muted); cursor: pointer; font-size: 16px; padding: 2px 6px; }
 
 @media (max-width: 1400px) { .agents-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 1024px) {
@@ -536,7 +502,7 @@ function fillStock(code: string, name: string): void {
   .agents-grid { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 768px) {
-  .analysis-view { padding: 12px; }
+  .analysis-view { padding: 10px; }
   .name-input { display: none; }
   .search-input { width: 120px; }
   .agents-grid { grid-template-columns: 1fr; }

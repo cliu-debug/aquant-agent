@@ -29,7 +29,9 @@
           <span class="log-source" :style="{ color: getSourceColor(log.source) }">
             [{{ log.sourceName }}]
           </span>
-          <span class="log-icon">{{ getLogIcon(log.level) }}</span>
+          <span class="log-level-badge" :class="`level-${log.level}`">
+            {{ getLogLevelText(log.level) }}
+          </span>
           <span class="log-message">{{ log.message }}</span>
         </div>
       </TransitionGroup>
@@ -115,24 +117,24 @@ const getSourceColor = (source: AgentType | 'system'): string => {
   return colors[source] || '#94A3B8'
 }
 
-/** 获取日志级别对应图标 */
-const getLogIcon = (level: LogLevel): string => {
-  const icons: Record<LogLevel, string> = {
-    [LogLevel.DEBUG]: '🔍',
-    [LogLevel.INFO]: 'ℹ️',
-    [LogLevel.SUCCESS]: '✅',
-    [LogLevel.WARNING]: '⚠️',
-    [LogLevel.ERROR]: '❌',
+/** 获取日志级别文字标签 */
+const getLogLevelText = (level: LogLevel): string => {
+  const textMap: Record<LogLevel, string> = {
+    [LogLevel.DEBUG]: 'DBG',
+    [LogLevel.INFO]: 'INF',
+    [LogLevel.SUCCESS]: 'OK',
+    [LogLevel.WARNING]: 'WRN',
+    [LogLevel.ERROR]: 'ERR',
   }
-  return icons[level] || 'ℹ️'
+  return textMap[level] || 'INF'
 }
 </script>
 
 <style scoped>
 .log-console {
-  background: #0D1117;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #080A12;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -232,6 +234,41 @@ const getLogIcon = (level: LogLevel): string => {
   flex-shrink: 0;
   font-size: 12px;
   line-height: 1.6;
+}
+
+.log-level-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 2px;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  line-height: 1.4;
+}
+
+.log-level-badge.level-debug {
+  color: #7B8499;
+  background: rgba(123, 132, 153, 0.1);
+}
+
+.log-level-badge.level-info {
+  color: #2563EB;
+  background: rgba(37, 99, 235, 0.1);
+}
+
+.log-level-badge.level-success {
+  color: #00B96B;
+  background: rgba(0, 185, 107, 0.1);
+}
+
+.log-level-badge.level-warning {
+  color: #FAAD14;
+  background: rgba(250, 173, 20, 0.1);
+}
+
+.log-level-badge.level-error {
+  color: #F5222D;
+  background: rgba(245, 34, 45, 0.1);
 }
 
 .log-message {
