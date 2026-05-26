@@ -13,7 +13,7 @@
         <div class="detail-header">
           <span class="detail-icon">{{ selectedAgent.icon }}</span>
           <span class="detail-name">{{ selectedAgent.name }}</span>
-          <button @click="selectedAgent = null" class="close-btn">✕</button>
+          <button @click="selectedAgent = null" class="close-btn">x</button>
         </div>
         <div class="detail-body">
           <div class="detail-status">
@@ -27,24 +27,8 @@
             <span class="label">进度:</span>
             <div class="progress-ring">
               <svg viewBox="0 0 100 100">
-                <circle
-                  class="progress-bg"
-                  cx="50" cy="50" r="45"
-                  fill="none"
-                  stroke="rgba(255,255,255,0.1)"
-                  stroke-width="8"
-                />
-                <circle
-                  class="progress-fill"
-                  cx="50" cy="50" r="45"
-                  fill="none"
-                  :stroke="selectedAgent.color"
-                  stroke-width="8"
-                  stroke-linecap="round"
-                  :stroke-dasharray="283"
-                  :stroke-dashoffset="283 - (283 * selectedAgent.progress / 100)"
-                  transform="rotate(-90 50 50)"
-                />
+                <circle class="progress-bg" cx="50" cy="50" r="45" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="8" />
+                <circle class="progress-fill" cx="50" cy="50" r="45" fill="none" :stroke="selectedAgent.color" stroke-width="8" stroke-linecap="round" :stroke-dasharray="283" :stroke-dashoffset="283 - (283 * selectedAgent.progress / 100)" transform="rotate(-90 50 50)" />
               </svg>
               <span class="progress-value">{{ selectedAgent.progress }}%</span>
             </div>
@@ -78,7 +62,6 @@ const containerRef = ref<HTMLElement>()
 const canvasRef = ref<HTMLCanvasElement>()
 const selectedAgent = ref<Agent | null>(null)
 
-/** 状态文字映射 */
 const statusTextMap: Record<string, string> = {
   [AgentStatus.IDLE]: '空闲',
   [AgentStatus.INITIALIZING]: '初始化',
@@ -88,7 +71,6 @@ const statusTextMap: Record<string, string> = {
   [AgentStatus.FAILED]: '失败',
 }
 
-/** 智能体类型颜色映射 */
 const agentColorMap: Record<AgentType, string> = {
   [AgentType.DATA_FETCHER]: '#06B6D4',
   [AgentType.TECHNICAL_ANALYST]: '#3B82F6',
@@ -102,7 +84,6 @@ const agentColorMap: Record<AgentType, string> = {
   [AgentType.TRADER]: '#6366F1',
 }
 
-/** Three.js 核心对象 */
 let scene: THREE.Scene
 let camera: THREE.PerspectiveCamera
 let renderer: THREE.WebGLRenderer
@@ -112,19 +93,27 @@ let raycaster: THREE.Raycaster
 let mouse: THREE.Vector2
 let particles: THREE.Points
 
-/** 智能体球体映射 */
 const agentMeshes = new Map<string, THREE.Group>()
-/** 连接线对象 */
-const connectionLines: THREE.Line[] = []
-/** 智能体原始 Y 坐标（用于浮动动画） */
 const agentBaseY = new Map<string, number>()
+/** 数据流粒子 - 沿连接线移动的光点 */
+const dataFlowParticles: Array<{
+  mesh: THREE.Mesh
+  fromIdx: number
+  toIdx: number
+  progress: number
+  speed: number
+  active: boolean
+}> = []
+/** 连接线定义 */
+const connectionDefs: Array<[number, number]> = [
+  [0, 1], [0, 2], [0, 3], [0, 4], [0, 5],
+  [1, 6], [2, 6], [3, 7], [4, 7], [5, 6], [5, 7],
+  [6, 8], [7, 8],
+  [8, 9],
+]
+/** 轨道环 */
+const orbitRings: THREE.Mesh[] = []
 
-/**
- * 获取智能体环形排列位置
- * @param count - 智能体数量
- * @param radius - 环形半径
- * @returns 位置数组
- */
 function getAgentPositions(count: number, radius: number = 5): { x: number; y: number }[] {
   const positions: { x: number; y: number }[] = []
   for (let i = 0; i < count; i++) {
@@ -137,22 +126,12 @@ function getAgentPositions(count: number, radius: number = 5): { x: number; y: n
   return positions
 }
 
-/**
- * 获取智能体对应颜色
- * @param type - 智能体类型
- * @returns 十六进制颜色字符串
- */
 function getAgentColor(type: AgentType): string {
   return agentColorMap[type] || '#64748B'
 }
 
-/**
- * 创建文字精灵（Sprite）
- * @param icon - emoji 图标
- * @param name - 智能体名称
- * @returns Sprite 对象
- */
-function createTextSprite(icon: string, name: string): THREE.Sprite {
+/** 创建文字精灵标签 */
+function createTextSprite(icon: string, name: string, status: AgentStatus): THREE.Sprite {
   const canvas = document.createElement('canvas')
   const context = canvas.getContext('2d')!
   canvas.width = 256
@@ -160,10 +139,21 @@ function createTextSprite(icon: string, name: string): THREE.Sprite {
 
   context.clearRect(0, 0, canvas.width, canvas.height)
 
-  context.fillStyle = 'rgba(15, 23, 42, 0.7)'
+  // 背景根据状态变化
+  const isActive = status === AgentStatus.RUNNING || status === AgentStatus.INITIALIZING
+  context.fillStyle = isActive ? 'rgba(59, 130, 246, 0.35)' : 'rgba(15, 23, 42, 0.7)'
   context.beginPath()
   context.roundRect(0, 0, canvas.width, canvas.height, 12)
   context.fill()
+
+  // 运行中时添加边框
+  if (isActive) {
+    context.strokeStyle = 'rgba(59, 130, 246, 0.6)'
+    context.lineWidth = 2
+    context.beginPath()
+    context.roundRect(1, 1, canvas.width - 2, canvas.height - 2, 12)
+    context.stroke()
+  }
 
   context.font = '28px Arial'
   context.fillStyle = '#ffffff'
@@ -172,7 +162,7 @@ function createTextSprite(icon: string, name: string): THREE.Sprite {
   context.fillText(icon, canvas.width / 2, 28)
 
   context.font = 'bold 18px Arial'
-  context.fillStyle = '#e2e8f0'
+  context.fillStyle = isActive ? '#93C5FD' : '#e2e8f0'
   context.fillText(name, canvas.width / 2, 66)
 
   const texture = new THREE.CanvasTexture(canvas)
@@ -180,56 +170,104 @@ function createTextSprite(icon: string, name: string): THREE.Sprite {
   const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false })
   const sprite = new THREE.Sprite(material)
   sprite.scale.set(2.2, 0.82, 1)
-
   return sprite
 }
 
-/**
- * 创建单个智能体球体组
- * @param agent - 智能体数据
- * @param position - 3D 位置
- * @returns Group 对象
- */
+/** 创建旋转光环（运行中时显示） */
+function createOrbitRing(color: THREE.Color): THREE.Mesh {
+  const geometry = new THREE.TorusGeometry(0.85, 0.02, 8, 48)
+  const material = new THREE.MeshBasicMaterial({
+    color: color,
+    transparent: true,
+    opacity: 0,
+  })
+  const ring = new THREE.Mesh(geometry, material)
+  ring.name = 'orbitRing'
+  // 随机倾斜角度
+  ring.rotation.x = Math.PI * 0.3
+  ring.rotation.y = Math.PI * 0.2
+  return ring
+}
+
+/** 创建脉冲波纹（运行中时从球体向外扩散） */
+function createPulseRing(color: THREE.Color): THREE.Mesh {
+  const geometry = new THREE.RingGeometry(0.55, 0.58, 32)
+  const material = new THREE.MeshBasicMaterial({
+    color: color,
+    transparent: true,
+    opacity: 0,
+    side: THREE.DoubleSide,
+  })
+  const ring = new THREE.Mesh(geometry, material)
+  ring.name = 'pulseRing'
+  ring.userData.pulsePhase = Math.random() * Math.PI * 2
+  return ring
+}
+
+/** 创建单个智能体球体组（增强版） */
 function createAgentOrb(agent: Agent, position: THREE.Vector3): THREE.Group {
   const group = new THREE.Group()
   group.userData = { agentId: agent.id }
 
   const color = new THREE.Color(getAgentColor(agent.type))
 
-  const geometry = new THREE.SphereGeometry(0.55, 16, 16)
-  const material = new THREE.MeshPhongMaterial({
+  // 核心球体 - 使用IcosahedronGeometry更科技感
+  const coreGeometry = new THREE.IcosahedronGeometry(0.5, 1)
+  const coreMaterial = new THREE.MeshPhongMaterial({
     color: color,
     emissive: color,
-    emissiveIntensity: agent.status === AgentStatus.RUNNING ? 0.5 : 0.15,
+    emissiveIntensity: 0.15,
     transparent: true,
     opacity: 0.92,
     shininess: 80,
+    wireframe: false,
   })
-  const sphere = new THREE.Mesh(geometry, material)
-  sphere.name = 'orb'
-  group.add(sphere)
+  const core = new THREE.Mesh(coreGeometry, coreMaterial)
+  core.name = 'orb'
+  group.add(core)
 
+  // 线框外壳 - 科技感
+  const wireGeometry = new THREE.IcosahedronGeometry(0.58, 1)
+  const wireMaterial = new THREE.MeshBasicMaterial({
+    color: color,
+    transparent: true,
+    opacity: 0.12,
+    wireframe: true,
+  })
+  const wireframe = new THREE.Mesh(wireGeometry, wireMaterial)
+  wireframe.name = 'wireframe'
+  group.add(wireframe)
+
+  // 外发光层
   const glowGeometry = new THREE.SphereGeometry(0.75, 16, 16)
   const glowMaterial = new THREE.MeshBasicMaterial({
     color: color,
     transparent: true,
-    opacity: 0.15,
+    opacity: 0.1,
   })
   const glow = new THREE.Mesh(glowGeometry, glowMaterial)
   glow.name = 'glow'
   group.add(glow)
 
-  const label = createTextSprite(agent.icon, agent.name)
-  label.position.set(0, -1.15, 0)
+  // 旋转光环
+  const orbitRing = createOrbitRing(color)
+  group.add(orbitRing)
+  orbitRings.push(orbitRing)
+
+  // 脉冲波纹
+  const pulseRing = createPulseRing(color)
+  group.add(pulseRing)
+
+  // 文字标签
+  const label = createTextSprite(agent.icon, agent.name, agent.status)
+  label.position.set(0, -1.2, 0)
+  label.name = 'label'
   group.add(label)
 
   group.position.copy(position)
   return group
 }
 
-/**
- * 创建所有智能体球体
- */
 function createAgentOrbs(): void {
   const positions = getAgentPositions(props.agents.length)
   props.agents.forEach((agent, index) => {
@@ -241,59 +279,65 @@ function createAgentOrbs(): void {
   })
 }
 
-/**
- * 创建智能体之间的连接线
- */
+/** 创建连接线（带流动效果） */
 function createConnections(): void {
-  const lineMaterial = new THREE.LineBasicMaterial({
-    color: 0x475569,
-    transparent: true,
-    opacity: 0.25,
-  })
-
   const positions = getAgentPositions(props.agents.length)
 
-  const connections: [number, number][] = [
-    [0, 1], [0, 2], [0, 3], [0, 4],
-    [1, 5], [2, 5], [3, 6], [4, 6],
-    [5, 7], [6, 7],
-    [7, 8],
-  ]
-
-  connections.forEach(([from, to]) => {
+  connectionDefs.forEach(([from, to]) => {
     if (from >= positions.length || to >= positions.length) return
-    const points = [
-      new THREE.Vector3(positions[from].x, positions[from].y, 0),
-      new THREE.Vector3(positions[to].x, positions[to].y, 0),
-    ]
-    const geometry = new THREE.BufferGeometry().setFromPoints(points)
-    const line = new THREE.Line(geometry, lineMaterial.clone())
+
+    const fromPos = new THREE.Vector3(positions[from].x, positions[from].y, 0)
+    const toPos = new THREE.Vector3(positions[to].x, positions[to].y, 0)
+
+    // 基础连接线
+    const lineGeometry = new THREE.BufferGeometry().setFromPoints([fromPos, toPos])
+    const lineMaterial = new THREE.LineBasicMaterial({
+      color: 0x475569,
+      transparent: true,
+      opacity: 0.15,
+    })
+    const line = new THREE.Line(lineGeometry, lineMaterial)
     scene.add(line)
-    connectionLines.push(line)
+
+    // 数据流粒子 - 沿连接线移动的小光点
+    const particleGeometry = new THREE.SphereGeometry(0.04, 6, 6)
+    const particleMaterial = new THREE.MeshBasicMaterial({
+      color: 0x3b82f6,
+      transparent: true,
+      opacity: 0,
+    })
+    const particleMesh = new THREE.Mesh(particleGeometry, particleMaterial)
+    scene.add(particleMesh)
+
+    dataFlowParticles.push({
+      mesh: particleMesh,
+      fromIdx: from,
+      toIdx: to,
+      progress: Math.random(),
+      speed: 0.003 + Math.random() * 0.004,
+      active: false,
+    })
   })
 }
 
-/**
- * 创建粒子背景效果
- */
 function createParticles(): void {
-  const particleCount = 100
+  const particleCount = 80
   const geometry = new THREE.BufferGeometry()
   const positions = new Float32Array(particleCount * 3)
 
   for (let i = 0; i < particleCount; i++) {
-    positions[i * 3] = (Math.random() - 0.5) * 50
-    positions[i * 3 + 1] = (Math.random() - 0.5) * 30
-    positions[i * 3 + 2] = (Math.random() - 0.5) * 20 - 10
+    positions[i * 3] = (Math.random() - 0.5) * 40
+    positions[i * 3 + 1] = (Math.random() - 0.5) * 25
+    positions[i * 3 + 2] = (Math.random() - 0.5) * 15 - 8
   }
 
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
 
   const material = new THREE.PointsMaterial({
     color: 0x3b82f6,
-    size: 0.08,
+    size: 0.06,
     transparent: true,
-    opacity: 0.5,
+    opacity: 0.35,
     sizeAttenuation: true,
   })
 
@@ -301,10 +345,6 @@ function createParticles(): void {
   scene.add(particles)
 }
 
-/**
- * 处理球体点击事件
- * @param event - 鼠标事件
- */
 function handleClick(event: MouseEvent): void {
   if (!containerRef.value || !camera || !scene) return
 
@@ -340,98 +380,209 @@ function handleClick(event: MouseEvent): void {
   }
 }
 
-/**
- * 更新单个智能体的视觉状态
- * @param agent - 智能体数据
- */
+/** 更新智能体视觉状态 */
 function updateAgentVisual(agent: Agent): void {
   const group = agentMeshes.get(agent.id)
   if (!group) return
 
   const orb = group.getObjectByName('orb') as THREE.Mesh | undefined
+  const wireframe = group.getObjectByName('wireframe') as THREE.Mesh | undefined
   const glow = group.getObjectByName('glow') as THREE.Mesh | undefined
+  const orbitRing = group.getObjectByName('orbitRing') as THREE.Mesh | undefined
+  const label = group.getObjectByName('label') as THREE.Sprite | undefined
   if (!orb) return
 
   const material = orb.material as THREE.MeshPhongMaterial
+  const color = new THREE.Color(getAgentColor(agent.type))
 
   switch (agent.status) {
     case AgentStatus.RUNNING:
     case AgentStatus.INITIALIZING: {
-      const color = new THREE.Color(getAgentColor(agent.type))
       material.color.copy(color)
       material.emissive.copy(color)
       material.emissiveIntensity = 0.5
-      if (glow) {
-        const glowMat = glow.material as THREE.MeshBasicMaterial
-        glowMat.opacity = 0.25
-      }
+      if (glow) { (glow.material as THREE.MeshBasicMaterial).opacity = 0.25 }
+      if (wireframe) { (wireframe.material as THREE.MeshBasicMaterial).opacity = 0.3 }
+      if (orbitRing) { (orbitRing.material as THREE.MeshBasicMaterial).opacity = 0.5 }
       break
     }
     case AgentStatus.COMPLETED: {
       material.color.setHex(0x22c55e)
       material.emissive.setHex(0x22c55e)
       material.emissiveIntensity = 0.3
-      if (glow) {
-        const glowMat = glow.material as THREE.MeshBasicMaterial
-        glowMat.color.setHex(0x22c55e)
-        glowMat.opacity = 0.2
-      }
+      if (glow) { (glow.material as THREE.MeshBasicMaterial).color.setHex(0x22c55e); (glow.material as THREE.MeshBasicMaterial).opacity = 0.15 }
+      if (wireframe) { (wireframe.material as THREE.MeshBasicMaterial).opacity = 0.08 }
+      if (orbitRing) { (orbitRing.material as THREE.MeshBasicMaterial).opacity = 0 }
       break
     }
     case AgentStatus.FAILED: {
       material.color.setHex(0xef4444)
       material.emissive.setHex(0xef4444)
       material.emissiveIntensity = 0.5
-      if (glow) {
-        const glowMat = glow.material as THREE.MeshBasicMaterial
-        glowMat.color.setHex(0xef4444)
-        glowMat.opacity = 0.3
-      }
+      if (glow) { (glow.material as THREE.MeshBasicMaterial).color.setHex(0xef4444); (glow.material as THREE.MeshBasicMaterial).opacity = 0.3 }
+      if (wireframe) { (wireframe.material as THREE.MeshBasicMaterial).opacity = 0.15; (wireframe.material as THREE.MeshBasicMaterial).color.setHex(0xef4444) }
+      if (orbitRing) { (orbitRing.material as THREE.MeshBasicMaterial).opacity = 0 }
+      break
+    }
+    case AgentStatus.WAITING: {
+      material.color.copy(color)
+      material.emissive.copy(color)
+      material.emissiveIntensity = 0.08
+      if (glow) { (glow.material as THREE.MeshBasicMaterial).opacity = 0.05 }
+      if (wireframe) { (wireframe.material as THREE.MeshBasicMaterial).opacity = 0.06 }
+      if (orbitRing) { (orbitRing.material as THREE.MeshBasicMaterial).opacity = 0 }
       break
     }
     default: {
-      const color = new THREE.Color(getAgentColor(agent.type))
       material.color.copy(color)
       material.emissive.copy(color)
       material.emissiveIntensity = 0.15
-      if (glow) {
-        const glowMat = glow.material as THREE.MeshBasicMaterial
-        glowMat.opacity = 0.1
-      }
+      if (glow) { (glow.material as THREE.MeshBasicMaterial).opacity = 0.1 }
+      if (wireframe) { (wireframe.material as THREE.MeshBasicMaterial).opacity = 0.12 }
+      if (orbitRing) { (orbitRing.material as THREE.MeshBasicMaterial).opacity = 0 }
     }
+  }
+
+  // 更新标签
+  if (label) {
+    const newLabel = createTextSprite(agent.icon, agent.name, agent.status)
+    label.material = newLabel.material
+    label.material.needsUpdate = true
   }
 }
 
-/**
- * 动画循环（限制30fps以降低GPU负载）
- */
+/** 判断连接线是否应该激活（两端有运行中的智能体） */
+function isConnectionActive(fromIdx: number, toIdx: number): boolean {
+  const fromAgent = props.agents[fromIdx]
+  const toAgent = props.agents[toIdx]
+  if (!fromAgent || !toAgent) return false
+  const running = AgentStatus.RUNNING
+  const init = AgentStatus.INITIALIZING
+  return (
+    (fromAgent.status === running || fromAgent.status === init) ||
+    (toAgent.status === running || toAgent.status === init)
+  )
+}
+
+/** 动画循环 */
 function animate(): void {
-  animationFrameId = window.setTimeout(animate, 33) // ~30fps
+  animationFrameId = window.setTimeout(animate, 33)
 
   const time = Date.now()
+  const positions = getAgentPositions(props.agents.length)
 
   agentMeshes.forEach((group, id) => {
     const agent = props.agents.find((a) => a.id === id)
     if (!agent) return
 
+    const orb = group.getObjectByName('orb') as THREE.Mesh | undefined
+    const wireframe = group.getObjectByName('wireframe') as THREE.Mesh | undefined
+    const glow = group.getObjectByName('glow') as THREE.Mesh | undefined
+    const orbitRing = group.getObjectByName('orbitRing') as THREE.Mesh | undefined
+    const pulseRing = group.getObjectByName('pulseRing') as THREE.Mesh | undefined
+
     if (agent.status === AgentStatus.RUNNING || agent.status === AgentStatus.INITIALIZING) {
+      // 运行中：浮动 + 脉冲发光 + 旋转线框 + 旋转光环
       const baseY = agentBaseY.get(id) ?? 0
       group.position.y = baseY + Math.sin(time * 0.003) * 0.12
 
-      const orb = group.getObjectByName('orb') as THREE.Mesh | undefined
       if (orb) {
         const mat = orb.material as THREE.MeshPhongMaterial
         mat.emissiveIntensity = 0.3 + Math.sin(time * 0.005) * 0.2
+        // 核心球体缓慢自转
+        orb.rotation.y += 0.008
+        orb.rotation.x += 0.003
       }
 
-      const glow = group.getObjectByName('glow') as THREE.Mesh | undefined
+      if (wireframe) {
+        // 线框反向旋转
+        wireframe.rotation.y -= 0.012
+        wireframe.rotation.z += 0.006
+        const wireMat = wireframe.material as THREE.MeshBasicMaterial
+        wireMat.opacity = 0.2 + Math.sin(time * 0.004) * 0.1
+      }
+
       if (glow) {
         const scale = 1.0 + Math.sin(time * 0.004) * 0.15
         glow.scale.set(scale, scale, scale)
       }
+
+      if (orbitRing) {
+        orbitRing.rotation.z += 0.02
+        const ringMat = orbitRing.material as THREE.MeshBasicMaterial
+        ringMat.opacity = 0.4 + Math.sin(time * 0.003) * 0.15
+      }
+
+      // 脉冲波纹 - 从球体向外扩散
+      if (pulseRing) {
+        const phase = (pulseRing.userData.pulsePhase + time * 0.002) % (Math.PI * 2)
+        const pulseScale = 1.0 + (phase / (Math.PI * 2)) * 1.5
+        pulseRing.scale.set(pulseScale, pulseScale, 1)
+        const pulseMat = pulseRing.material as THREE.MeshBasicMaterial
+        pulseMat.opacity = Math.max(0, 0.4 * (1 - phase / (Math.PI * 2)))
+      }
+
+    } else if (agent.status === AgentStatus.COMPLETED) {
+      // 完成：轻微呼吸
+      if (orb) {
+        const mat = orb.material as THREE.MeshPhongMaterial
+        mat.emissiveIntensity = 0.2 + Math.sin(time * 0.002) * 0.05
+      }
+      if (wireframe) { wireframe.rotation.y += 0.002 }
+      if (pulseRing) { (pulseRing.material as THREE.MeshBasicMaterial).opacity = 0 }
+
+    } else if (agent.status === AgentStatus.WAITING) {
+      // 等待：微弱呼吸
+      if (orb) {
+        const mat = orb.material as THREE.MeshPhongMaterial
+        mat.emissiveIntensity = 0.05 + Math.sin(time * 0.001) * 0.03
+      }
+      if (pulseRing) { (pulseRing.material as THREE.MeshBasicMaterial).opacity = 0 }
+
+    } else if (agent.status === AgentStatus.FAILED) {
+      // 失败：抖动
+      const baseY = agentBaseY.get(id) ?? 0
+      group.position.y = baseY + Math.sin(time * 0.05) * 0.05
+      if (pulseRing) { (pulseRing.material as THREE.MeshBasicMaterial).opacity = 0 }
+
+    } else {
+      // 空闲：轻微浮动
+      const baseY = agentBaseY.get(id) ?? 0
+      group.position.y = baseY + Math.sin(time * 0.001 + agentBaseY.size) * 0.03
+      if (wireframe) { wireframe.rotation.y += 0.001 }
+      if (pulseRing) { (pulseRing.material as THREE.MeshBasicMaterial).opacity = 0 }
     }
   })
 
+  // 数据流粒子动画
+  dataFlowParticles.forEach((particle) => {
+    const active = isConnectionActive(particle.fromIdx, particle.toIdx)
+    particle.active = active
+
+    if (active) {
+      particle.progress += particle.speed
+      if (particle.progress > 1) particle.progress = 0
+
+      const fromPos = positions[particle.fromIdx]
+      const toPos = positions[particle.toIdx]
+      if (fromPos && toPos) {
+        const x = fromPos.x + (toPos.x - fromPos.x) * particle.progress
+        const y = fromPos.y + (toPos.y - fromPos.y) * particle.progress
+        particle.mesh.position.set(x, y, 0)
+
+        const mat = particle.mesh.material as THREE.MeshBasicMaterial
+        // 粒子在中间最亮，两端渐隐
+        const brightness = Math.sin(particle.progress * Math.PI)
+        mat.opacity = brightness * 0.8
+        const scale = 0.8 + brightness * 0.5
+        particle.mesh.scale.set(scale, scale, scale)
+      }
+    } else {
+      (particle.mesh.material as THREE.MeshBasicMaterial).opacity = 0
+    }
+  })
+
+  // 背景粒子缓慢旋转
   if (particles) {
     particles.rotation.z += 0.0002
   }
@@ -440,9 +591,6 @@ function animate(): void {
   renderer.render(scene, camera)
 }
 
-/**
- * 窗口 resize 自适应
- */
 function handleResize(): void {
   if (!containerRef.value) return
   const width = containerRef.value.clientWidth
@@ -453,9 +601,6 @@ function handleResize(): void {
   renderer.setSize(width, height)
 }
 
-/**
- * 初始化 Three.js 场景
- */
 function initScene(): void {
   if (!canvasRef.value || !containerRef.value) return
 
@@ -464,6 +609,9 @@ function initScene(): void {
 
   scene = new THREE.Scene()
   scene.background = new THREE.Color(0x0f172a)
+
+  // 添加雾效增加深度感
+  scene.fog = new THREE.FogExp2(0x0f172a, 0.02)
 
   const aspect = width / height
   camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 1000)
@@ -484,7 +632,7 @@ function initScene(): void {
   controls.maxDistance = 30
   controls.enablePan = false
 
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.5)
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.4)
   scene.add(ambientLight)
 
   const pointLight1 = new THREE.PointLight(0x3b82f6, 1.5, 50)
@@ -507,9 +655,6 @@ function initScene(): void {
   animate()
 }
 
-/**
- * 清理 Three.js 资源
- */
 function cleanup(): void {
   clearTimeout(animationFrameId)
 
@@ -533,7 +678,8 @@ function cleanup(): void {
 
   agentMeshes.clear()
   agentBaseY.clear()
-  connectionLines.length = 0
+  dataFlowParticles.length = 0
+  orbitRings.length = 0
 }
 
 watch(
@@ -612,9 +758,7 @@ onUnmounted(() => {
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.detail-icon {
-  font-size: 24px;
-}
+.detail-icon { font-size: 24px; }
 
 .detail-name {
   flex: 1;
@@ -634,13 +778,9 @@ onUnmounted(() => {
   transition: color 0.2s;
 }
 
-.close-btn:hover {
-  color: #f8fafc;
-}
+.close-btn:hover { color: #f8fafc; }
 
-.detail-body {
-  padding: 16px;
-}
+.detail-body { padding: 16px; }
 
 .detail-status,
 .detail-progress,
@@ -677,25 +817,11 @@ onUnmounted(() => {
   background: currentColor;
 }
 
-.status-badge.status-running {
-  color: #f59e0b;
-}
-
-.status-badge.status-running .status-dot {
-  animation: blink 1s ease-in-out infinite;
-}
-
-.status-badge.status-completed {
-  color: #22c55e;
-}
-
-.status-badge.status-failed {
-  color: #ef4444;
-}
-
-.status-badge.status-idle {
-  color: #10b981;
-}
+.status-badge.status-running { color: #f59e0b; }
+.status-badge.status-running .status-dot { animation: blink 1s ease-in-out infinite; }
+.status-badge.status-completed { color: #22c55e; }
+.status-badge.status-failed { color: #ef4444; }
+.status-badge.status-idle { color: #10b981; }
 
 @keyframes blink {
   0%, 100% { opacity: 1; }
@@ -709,10 +835,7 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-.progress-ring svg {
-  width: 100%;
-  height: 100%;
-}
+.progress-ring svg { width: 100%; height: 100%; }
 
 .progress-value {
   position: absolute;
@@ -724,10 +847,7 @@ onUnmounted(() => {
   color: #f8fafc;
 }
 
-.task-text {
-  color: #e2e8f0;
-  font-size: 13px;
-}
+.task-text { color: #e2e8f0; font-size: 13px; }
 
 .detail-output {
   margin-top: 16px;
