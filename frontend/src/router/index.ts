@@ -10,6 +10,12 @@ const router = createRouter({
       meta: { title: '智能体分析' },
     },
     {
+      path: '/market',
+      name: 'market',
+      component: () => import('@/views/MarketView.vue'),
+      meta: { title: '市场总览' },
+    },
+    {
       path: '/screener',
       name: 'screener',
       component: () => import('@/views/ScreenerView.vue'),
@@ -52,10 +58,40 @@ const router = createRouter({
       meta: { title: '宏观分析' },
     },
     {
-      path: '/market',
-      name: 'market',
-      component: () => import('@/views/MarketView.vue'),
-      meta: { title: '市场总览' },
+      path: '/decision',
+      name: 'decision',
+      component: () => import('@/views/DecisionView.vue'),
+      meta: { title: '决策中心' },
+    },
+    {
+      path: '/capital-flow',
+      name: 'capitalFlow',
+      component: () => import('@/views/CapitalFlowView.vue'),
+      meta: { title: '资金流向' },
+    },
+    {
+      path: '/sentiment',
+      name: 'sentiment',
+      component: () => import('@/views/SentimentView.vue'),
+      meta: { title: '市场情绪' },
+    },
+    {
+      path: '/position-sizing',
+      name: 'positionSizing',
+      component: () => import('@/views/PositionSizingView.vue'),
+      meta: { title: '仓位计算' },
+    },
+    {
+      path: '/scheduler',
+      name: 'scheduler',
+      component: () => import('@/views/SchedulerView.vue'),
+      meta: { title: '调度器' },
+    },
+    {
+      path: '/notification',
+      name: 'notification',
+      component: () => import('@/views/NotificationView.vue'),
+      meta: { title: '通知中心' },
     },
   ],
 })
