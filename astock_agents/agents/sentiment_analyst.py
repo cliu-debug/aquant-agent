@@ -87,6 +87,18 @@ class SentimentAnalyst(BaseAgent):
             news_sentiment, sentiment_trend, signal
         )
 
+        # LLM增强分析：对市场情绪进行深度解读
+        if self.llm:
+            try:
+                llm_insight = self._llm_enhance_analysis(
+                    stock_data, sentiment_score, hot_topics, fund_flow,
+                    news_sentiment, sentiment_trend, signal
+                )
+                if llm_insight.get("summary"):
+                    summary = llm_insight["summary"]
+            except Exception as e:
+                logger.warning(f"[{self.name}] LLM增强分析失败，使用规则引擎结果: {e}")
+
         analysis = SentimentAnalysis(
             overall_score=sentiment_score,
             market_sentiment=market_sentiment,
@@ -369,3 +381,56 @@ class SentimentAnalyst(BaseAgent):
         lines.append(f"【情绪信号】{signal.value}")
 
         return "\n".join(lines)
+
+    def _llm_enhance_analysis(
+        self,
+        stock_data: StockData,
+        sentiment_score: int,
+        hot_topics: List[str],
+        fund_flow: str,
+        news_sentiment: str,
+        sentiment_trend: str,
+        signal: Signal
+    ) -> Dict[str, str]:
+        """
+        使用LLM对市场情绪进行深度解读
+
+        基于情绪指标数据，调用LLM生成深度分析
+
+        Args:
+            stock_data: 股票数据
+            sentiment_score: 情绪评分
+            hot_topics: 热点题材列表
+            fund_flow: 资金流向描述
+            news_sentiment: 新闻情绪描述
+            sentiment_trend: 情绪趋势
+            signal: 交易信号
+
+        Returns:
+            LLM结构化输出字典
+        """
+        # 构建数据摘要（基于情绪指标数据）
+        data_parts = [
+            f"股票={stock_data.stock_name}({stock_data.stock_code})",
+            f"行业={stock_data.industry or '未知'}",
+            f"情绪评分={sentiment_score}/100",
+            f"资金流向={fund_flow}",
+            f"新闻情绪={news_sentiment}",
+            f"情绪趋势={sentiment_trend}",
+            f"信号={signal.value}",
+        ]
+
+        if hot_topics:
+            data_parts.append(f"热点题材={', '.join(hot_topics[:5])}")
+
+        data_summary = ", ".join(data_parts)
+
+        instruction = (
+            f"基于以上情绪指标数据，对{stock_data.stock_name}的市场情绪进行深度解读。"
+            "请分析：1)当前市场情绪状态及演变趋势；2)资金流向反映的市场态度；"
+            "3)情绪面可能对股价产生的影响。所有结论必须基于提供的数据，不得编造。"
+        )
+
+        output_fields = ["summary", "sentiment_deep_analysis", "impact_assessment"]
+
+        return self._call_llm_with_data(data_summary, instruction, output_fields)

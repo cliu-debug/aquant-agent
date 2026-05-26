@@ -65,7 +65,18 @@ class BearResearcher(BaseAgent):
             "confidence": confidence,
             "argument_count": len(arguments)
         }
-        
+
+        # LLM增强分析：从看空角度论证卖出理由
+        if self.llm:
+            try:
+                llm_thesis = self._llm_generate_bear_thesis(
+                    stock_data, technical, fundamental, sentiment, news, arguments
+                )
+                if llm_thesis.get("bear_thesis"):
+                    result["bear_thesis"] = llm_thesis["bear_thesis"]
+            except Exception as e:
+                logger.warning(f"[{self.name}] LLM增强分析失败，使用规则引擎结果: {e}")
+
         logger.info(f"[{self.name}] 空头研究完成，发现{len(arguments)}条看空论据")
         return result
     
@@ -200,3 +211,70 @@ class BearResearcher(BaseAgent):
         bonus = sell_signals * 5
 
         return min(100, int(base_score + sell_score + bonus))
+
+    def _llm_generate_bear_thesis(
+        self,
+        stock_data: StockData,
+        technical: TechnicalAnalysis,
+        fundamental: FundamentalAnalysis,
+        sentiment: SentimentAnalysis,
+        news: NewsAnalysis,
+        arguments: List[str]
+    ) -> Dict[str, str]:
+        """
+        使用LLM从看空角度论证卖出理由
+
+        LLM必须引用其他智能体的具体数据
+
+        Args:
+            stock_data: 股票数据
+            technical: 技术分析结果
+            fundamental: 基本面分析结果
+            sentiment: 情绪分析结果
+            news: 新闻分析结果
+            arguments: 规则引擎已提取的看空论据
+
+        Returns:
+            LLM结构化输出字典
+        """
+        # 构建数据摘要（引用其他智能体的具体数据）
+        data_parts = [
+            f"股票={stock_data.stock_name}({stock_data.stock_code})",
+            f"当前价格={stock_data.current_price}",
+            f"技术信号={technical.signal.value}",
+            f"趋势={technical.trend}",
+            f"趋势强度={technical.trend_strength}",
+            f"RSI={technical.indicators.get('rsi', {}).get('value', 'N/A')}",
+            f"MACD趋势={technical.indicators.get('macd', {}).get('trend', 'N/A')}",
+            f"基本面信号={fundamental.signal.value}",
+            f"盈利能力评分={fundamental.profitability_score}",
+            f"估值评分={fundamental.valuation_score}",
+            f"PE={fundamental.key_metrics.get('pe_ttm', 'N/A')}",
+            f"负债率={fundamental.key_metrics.get('debt_ratio', 'N/A')}",
+            f"情绪信号={sentiment.signal.value}",
+            f"情绪评分={sentiment.overall_score}",
+            f"资金流向={sentiment.fund_flow}",
+            f"新闻信号={news.signal.value}",
+            f"风险事件数={len(news.risk_events)}",
+        ]
+
+        # 添加风险事件详情
+        for i, event in enumerate(news.risk_events[:3]):
+            level = event.get("level", "未知")
+            keyword = event.get("keyword", "")
+            data_parts.append(f"风险{i+1}=[{level}风险-{keyword}]")
+
+        if arguments:
+            data_parts.append(f"已有看空论据={'；'.join(arguments[:5])}")
+
+        data_summary = ", ".join(data_parts)
+
+        instruction = (
+            f"基于以上各分析师的具体数据，从看空角度为{stock_data.stock_name}构建卖出论证。"
+            "请引用具体数据（如'技术指标RSI=80超买'、'负债率=75%财务风险大'等），"
+            "给出有说服力的看空逻辑。所有论据必须基于提供的数据，不得编造。"
+        )
+
+        output_fields = ["bear_thesis", "key_data_references", "opportunity_acknowledgment"]
+
+        return self._call_llm_with_data(data_summary, instruction, output_fields)

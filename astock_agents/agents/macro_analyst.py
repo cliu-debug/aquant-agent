@@ -91,6 +91,17 @@ class MacroAnalyst(BaseAgent):
             "summary": self._generate_summary(stock_data, cycle, industry_fit, signal),
         }
 
+        # LLM增强分析：对宏观经济环境进行深度解读
+        if self.llm:
+            try:
+                llm_insight = self._llm_enhance_analysis(
+                    stock_data, cycle, industry_fit, policy_env, market_valuation, signal
+                )
+                if llm_insight.get("summary"):
+                    result["summary"] = llm_insight["summary"]
+            except Exception as e:
+                logger.warning(f"[{self.name}] LLM增强分析失败，使用规则引擎结果: {e}")
+
         self.log_analysis(result)
         return result
 
@@ -287,3 +298,58 @@ class MacroAnalyst(BaseAgent):
             f"行业适配度{industry_fit.get('fit_level', '未知')}，"
             f"宏观信号{signal.value}"
         )
+
+    def _llm_enhance_analysis(
+        self,
+        stock_data: StockData,
+        cycle: Dict[str, Any],
+        industry_fit: Dict[str, Any],
+        policy_env: Dict[str, Any],
+        market_valuation: Dict[str, Any],
+        signal: Signal
+    ) -> Dict[str, str]:
+        """
+        使用LLM对宏观经济环境进行深度解读
+
+        基于经济周期、行业适配度、政策环境等数据，调用LLM生成深度分析
+
+        Args:
+            stock_data: 股票数据
+            cycle: 经济周期信息
+            industry_fit: 行业适配度信息
+            policy_env: 政策环境信息
+            market_valuation: 市场估值信息
+            signal: 交易信号
+
+        Returns:
+            LLM结构化输出字典
+        """
+        # 构建数据摘要
+        data_parts = [
+            f"股票={stock_data.stock_name}({stock_data.stock_code})",
+            f"行业={stock_data.industry or '未知'}",
+            f"经济周期={cycle.get('current_phase', '未知')}",
+            f"周期描述={cycle.get('description', '未知')}",
+            f"有利行业={', '.join(cycle.get('favorable_sectors', []))}",
+            f"不利行业={', '.join(cycle.get('unfavorable_sectors', []))}",
+            f"行业适配度={industry_fit.get('fit_level', '未知')}",
+            f"适配评分={industry_fit.get('score', 'N/A')}",
+            f"政策立场={policy_env.get('policy_stance', '未知')}",
+            f"政策评分={policy_env.get('score', 'N/A')}",
+            f"市场估值={market_valuation.get('level', '未知')}",
+            f"估值评分={market_valuation.get('score', 'N/A')}",
+            f"PE={market_valuation.get('pe', 'N/A')}",
+            f"信号={signal.value}",
+        ]
+
+        data_summary = ", ".join(data_parts)
+
+        instruction = (
+            f"基于以上宏观经济数据，对{stock_data.stock_name}所处的宏观环境进行深度解读。"
+            "请分析：1)当前经济周期对该行业的具体影响；2)政策环境对行业发展的利弊；"
+            "3)宏观面综合判断及投资建议。所有结论必须基于提供的数据，不得编造。"
+        )
+
+        output_fields = ["summary", "macro_deep_analysis", "investment_implications"]
+
+        return self._call_llm_with_data(data_summary, instruction, output_fields)

@@ -79,7 +79,18 @@ class NewsAnalyst(BaseAgent):
         summary = self._generate_summary(
             stock_data, key_news, key_announcements, macro_impact, risk_events, signal
         )
-        
+
+        # LLM增强分析：基于真实新闻内容进行情感分析和影响评估
+        if self.llm:
+            try:
+                llm_insight = self._llm_enhance_analysis(
+                    stock_data, key_news, key_announcements, risk_events, signal
+                )
+                if llm_insight.get("summary"):
+                    summary = llm_insight["summary"]
+            except Exception as e:
+                logger.warning(f"[{self.name}] LLM增强分析失败，使用规则引擎结果: {e}")
+
         analysis = NewsAnalysis(
             key_news=key_news,
             key_announcements=key_announcements,
@@ -304,3 +315,67 @@ class NewsAnalyst(BaseAgent):
         lines.append(f"【新闻信号】{signal.value}")
 
         return "\n".join(lines)
+
+    def _llm_enhance_analysis(
+        self,
+        stock_data: StockData,
+        key_news: List[Dict],
+        key_announcements: List[Dict],
+        risk_events: List[Dict],
+        signal: Signal
+    ) -> Dict[str, str]:
+        """
+        使用LLM对新闻内容进行情感分析和影响评估
+
+        基于真实新闻文本，调用LLM生成深度分析
+
+        Args:
+            stock_data: 股票数据
+            key_news: 关键新闻列表
+            key_announcements: 重要公告列表
+            risk_events: 风险事件列表
+            signal: 交易信号
+
+        Returns:
+            LLM结构化输出字典
+        """
+        # 构建数据摘要（只包含真实新闻数据）
+        data_parts = [
+            f"股票={stock_data.stock_name}({stock_data.stock_code})",
+            f"行业={stock_data.industry or '未知'}",
+            f"新闻数量={len(key_news)}",
+            f"公告数量={len(key_announcements)}",
+            f"风险事件数量={len(risk_events)}",
+            f"信号={signal.value}",
+        ]
+
+        # 添加新闻标题（最多5条）
+        for i, news in enumerate(key_news[:5]):
+            title = news.get("title", "")
+            if title:
+                data_parts.append(f"新闻{i+1}={title[:50]}")
+
+        # 添加公告标题（最多3条）
+        for i, ann in enumerate(key_announcements[:3]):
+            title = ann.get("title", "")
+            if title:
+                data_parts.append(f"公告{i+1}={title[:50]}")
+
+        # 添加风险事件
+        for i, event in enumerate(risk_events[:3]):
+            level = event.get("level", "未知")
+            keyword = event.get("keyword", "")
+            title = event.get("title", "")
+            data_parts.append(f"风险{i+1}=[{level}风险-{keyword}]{title[:30]}")
+
+        data_summary = ", ".join(data_parts)
+
+        instruction = (
+            f"基于以上新闻和公告数据，对{stock_data.stock_name}的新闻面进行深度解读。"
+            "请分析：1)新闻整体情感倾向及对股价的可能影响；2)关键风险事件评估；"
+            "3)需要重点关注的信息。所有结论必须基于提供的新闻数据，不得编造新闻。"
+        )
+
+        output_fields = ["summary", "sentiment_assessment", "key_risks"]
+
+        return self._call_llm_with_data(data_summary, instruction, output_fields)

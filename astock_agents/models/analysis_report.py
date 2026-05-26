@@ -132,17 +132,21 @@ class DebateResult(BaseModel):
     # 多头观点
     bull_arguments: List[str] = Field(default_factory=list, description="多头论据")
     bull_confidence: int = Field(..., ge=0, le=100, description="多头置信度")
-    
+
     # 空头观点
     bear_arguments: List[str] = Field(default_factory=list, description="空头论据")
     bear_confidence: int = Field(..., ge=0, le=100, description="空头置信度")
-    
+
     # 辩论结论
     debate_summary: str = Field(..., description="辩论总结")
     winning_side: str = Field(..., description="获胜方: bull/bear/neutral")
-    
+
     # 关键分歧点
     key_disagreements: List[str] = Field(default_factory=list, description="关键分歧")
+
+    # LLM增强字段
+    bull_thesis: Optional[str] = Field(default=None, description="LLM生成的多头论证")
+    bear_thesis: Optional[str] = Field(default=None, description="LLM生成的空头论证")
 
 
 class TradeProposal(BaseModel):
@@ -174,6 +178,9 @@ class TradeProposal(BaseModel):
     # 提案说明
     proposal_text: str = Field(..., description="完整提案文本")
 
+    # LLM增强字段
+    rationale: Optional[str] = Field(default=None, description="LLM生成的交易决策逻辑说明")
+
 
 class RiskAssessment(BaseModel):
     """风险评估"""
@@ -196,6 +203,9 @@ class RiskAssessment(BaseModel):
     # 是否批准交易
     approved: bool = Field(..., description="是否批准")
     approval_notes: Optional[str] = None  # 审批意见
+
+    # LLM增强字段
+    qualitative_notes: Optional[str] = Field(default=None, description="LLM生成的定性风险评估说明")
 
 
 class AnalysisReport(BaseModel):

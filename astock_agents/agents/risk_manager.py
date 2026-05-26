@@ -73,6 +73,19 @@ class RiskManager(BaseAgent):
             trade_proposal, risk_score, risk_level
         )
 
+        # LLM增强分析：对风险进行定性评估
+        qualitative_notes = None
+        if self.llm:
+            try:
+                llm_result = self._llm_qualitative_assessment(
+                    stock_data, trade_proposal, risk_score, risk_level,
+                    market_risk, liquidity_risk, volatility_risk, fundamental_risk
+                )
+                if llm_result.get("qualitative_notes"):
+                    qualitative_notes = llm_result["qualitative_notes"]
+            except Exception as e:
+                logger.warning(f"[{self.name}] LLM增强分析失败，使用规则引擎结果: {e}")
+
         # 确保所有值为Python原生类型（避免numpy类型序列化失败）
         risk_score = int(risk_score)
         market_risk = int(market_risk)
@@ -91,7 +104,8 @@ class RiskManager(BaseAgent):
             risk_analysis=risk_analysis,
             risk_control_suggestions=suggestions,
             approved=approved,
-            approval_notes=approval_notes
+            approval_notes=approval_notes,
+            qualitative_notes=qualitative_notes
         )
         
         logger.info(f"[{self.name}] 风险评估完成: {risk_level.value}, 批准: {approved}")
@@ -308,3 +322,63 @@ class RiskManager(BaseAgent):
             return False, "盈亏比过低(<1.2)，风险收益不匹配"
         
         return True, "风险可控，批准交易"
+
+    def _llm_qualitative_assessment(
+        self,
+        stock_data: StockData,
+        trade_proposal: TradeProposal,
+        risk_score: int,
+        risk_level: RiskLevel,
+        market_risk: int,
+        liquidity_risk: int,
+        volatility_risk: int,
+        fundamental_risk: int
+    ) -> Dict[str, str]:
+        """
+        使用LLM对风险进行定性评估
+
+        LLM必须基于具体的风险指标数据
+
+        Args:
+            stock_data: 股票数据
+            trade_proposal: 交易提案
+            risk_score: 综合风险评分
+            risk_level: 风险等级
+            market_risk: 市场风险评分
+            liquidity_risk: 流动性风险评分
+            volatility_risk: 波动率风险评分
+            fundamental_risk: 基本面风险评分
+
+        Returns:
+            LLM结构化输出字典
+        """
+        # 构建数据摘要（基于具体风险指标数据）
+        data_parts = [
+            f"股票={stock_data.stock_name}({stock_data.stock_code})",
+            f"当前价格={stock_data.current_price}",
+            f"交易方向={trade_proposal.direction.value}",
+            f"建议仓位={trade_proposal.position_size_pct}%",
+            f"综合风险评分={risk_score}/100",
+            f"风险等级={risk_level.value}",
+            f"市场风险={market_risk}/100",
+            f"流动性风险={liquidity_risk}/100",
+            f"波动率风险={volatility_risk}/100",
+            f"基本面风险={fundamental_risk}/100",
+            f"PE={stock_data.pe_ttm or 'N/A'}",
+            f"市值={stock_data.market_cap or 'N/A'}",
+        ]
+
+        if trade_proposal.risk_reward_ratio:
+            data_parts.append(f"盈亏比={trade_proposal.risk_reward_ratio}")
+
+        data_summary = ", ".join(data_parts)
+
+        instruction = (
+            f"基于以上风险指标数据，对{stock_data.stock_name}的交易风险进行定性评估。"
+            "请分析：1)主要风险来源及其严重程度；2)风险之间的关联性；"
+            "3)在当前风险水平下的操作建议。所有分析必须基于提供的数据，不得编造。"
+        )
+
+        output_fields = ["qualitative_notes", "risk_interactions", "action_suggestions"]
+
+        return self._call_llm_with_data(data_summary, instruction, output_fields)

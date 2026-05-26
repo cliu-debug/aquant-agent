@@ -87,6 +87,17 @@ class TechnicalAnalyst(BaseAgent):
         trend_strength = int(trend_strength)
         confidence = int(confidence)
 
+        # LLM增强分析：基于已计算的技术指标进行深度解读
+        if self.llm:
+            try:
+                llm_insight = self._llm_enhance_analysis(
+                    stock_data, trend, indicators, patterns, signal
+                )
+                if llm_insight.get("summary"):
+                    summary = llm_insight["summary"]
+            except Exception as e:
+                logger.warning(f"[{self.name}] LLM增强分析失败，使用规则引擎结果: {e}")
+
         analysis = TechnicalAnalysis(
             trend=trend,
             trend_strength=trend_strength,
@@ -1102,6 +1113,73 @@ class TechnicalAnalyst(BaseAgent):
         elif isinstance(obj, np.ndarray):
             return obj.tolist()
         return obj
+
+    # ==================== LLM增强分析 ====================
+
+    def _llm_enhance_analysis(
+        self,
+        stock_data: StockData,
+        trend: str,
+        indicators: Dict,
+        patterns: List[str],
+        signal: Signal
+    ) -> Dict[str, str]:
+        """
+        使用LLM对技术指标进行深度解读
+
+        基于已计算的真实指标数据，调用LLM生成深度分析
+
+        Args:
+            stock_data: 股票数据
+            trend: 趋势判断
+            indicators: 技术指标字典
+            patterns: 识别的形态列表
+            signal: 交易信号
+
+        Returns:
+            LLM结构化输出字典
+        """
+        # 构建数据摘要（只包含真实计算结果）
+        data_parts = [
+            f"股票={stock_data.stock_name}({stock_data.stock_code})",
+            f"当前价格={stock_data.current_price}",
+            f"趋势={trend}",
+            f"RSI={indicators.get('rsi', {}).get('value', 'N/A')}",
+            f"RSI区间={indicators.get('rsi', {}).get('zone', 'N/A')}",
+            f"MACD_DIF={indicators.get('macd', {}).get('dif', 'N/A')}",
+            f"MACD_DEA={indicators.get('macd', {}).get('dea', 'N/A')}",
+            f"MACD柱={indicators.get('macd', {}).get('histogram', 'N/A')}",
+            f"MACD交叉={indicators.get('macd', {}).get('cross_signal', 'N/A')}",
+            f"KDJ_K={indicators.get('kdj', {}).get('k', 'N/A')}",
+            f"KDJ_D={indicators.get('kdj', {}).get('d', 'N/A')}",
+            f"KDJ_J={indicators.get('kdj', {}).get('j', 'N/A')}",
+            f"布林带位置={indicators.get('bollinger', {}).get('position', 'N/A')}%",
+            f"布林带信号={indicators.get('bollinger', {}).get('signal', 'N/A')}",
+            f"ATR波动率={indicators.get('atr', {}).get('pct', 'N/A')}%",
+            f"ADX={indicators.get('adx', {}).get('adx', 'N/A')}",
+            f"ADX趋势强度={indicators.get('adx', {}).get('trend_strength', 'N/A')}",
+            f"均线排列={indicators.get('ma', {}).get('alignment', 'N/A')}",
+            f"量价关系={indicators.get('volume_price', {}).get('relation', 'N/A')}",
+            f"成交量状态={indicators.get('volume', {}).get('status', 'N/A')}",
+            f"OBV趋势={indicators.get('obv', {}).get('trend', 'N/A')}",
+            f"OBV背离={indicators.get('obv', {}).get('divergence', 'N/A')}",
+            f"信号={signal.value}",
+        ]
+
+        if patterns:
+            data_parts.append(f"形态={', '.join(patterns[:5])}")
+
+        data_summary = ", ".join(data_parts)
+
+        instruction = (
+            f"基于以上技术指标数据，对{stock_data.stock_name}的技术面进行深度解读。"
+            "请分析：1)当前技术面整体状况；2)关键信号及其含义；3)需要关注的风险点。"
+            "所有结论必须基于提供的数据，不得编造指标数值。"
+        )
+
+        output_fields = ["summary", "key_signals", "risk_warnings"]
+
+        return self._call_llm_with_data(data_summary, instruction, output_fields)
 
     # ==================== 报告生成 ====================
     

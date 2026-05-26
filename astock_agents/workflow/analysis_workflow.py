@@ -225,7 +225,9 @@ class AnalysisWorkflow:
                 bear_confidence=bear_result.get("confidence", 50),
                 debate_summary=self._summarize_debate(bull_result, bear_result),
                 winning_side=self._determine_winner(bull_result, bear_result),
-                key_disagreements=self._find_disagreements(bull_result, bear_result)
+                key_disagreements=self._find_disagreements(bull_result, bear_result),
+                bull_thesis=bull_result.get("bull_thesis"),
+                bear_thesis=bear_result.get("bear_thesis")
             )
 
             state["debate_result"] = debate

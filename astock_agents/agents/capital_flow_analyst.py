@@ -144,6 +144,20 @@ class CapitalFlowAnalyst(BaseAgent):
                 price_capital_divergence
             )
 
+            # LLM增强分析：对资金流向进行深度解读
+            if self.llm:
+                try:
+                    llm_insight = self._llm_enhance_analysis(
+                        stock_data, main_force_net_inflow, main_force_direction,
+                        north_bound_net_buy, north_bound_days,
+                        margin_balance_change, capital_resonance,
+                        price_capital_divergence, signal, score
+                    )
+                    if llm_insight.get("summary"):
+                        summary = llm_insight["summary"]
+                except Exception as e:
+                    logger.warning(f"[{self.name}] LLM增强分析失败，使用规则引擎结果: {e}")
+
             result = CapitalFlowResult(
                 main_force_net_inflow=round(main_force_net_inflow, 2),
                 main_force_direction=main_force_direction,
@@ -698,3 +712,65 @@ class CapitalFlowAnalyst(BaseAgent):
         """
         from dataclasses import asdict
         return asdict(result)
+
+    def _llm_enhance_analysis(
+        self,
+        stock_data: StockData,
+        main_force_net_inflow: float,
+        main_force_direction: str,
+        north_bound_net_buy: float,
+        north_bound_days: int,
+        margin_balance_change: float,
+        capital_resonance: float,
+        price_capital_divergence: bool,
+        signal: str,
+        score: int
+    ) -> Dict[str, str]:
+        """
+        使用LLM对资金流向进行深度解读
+
+        基于资金数据，调用LLM生成深度分析
+
+        Args:
+            stock_data: 股票数据
+            main_force_net_inflow: 主力净流入
+            main_force_direction: 主力资金方向
+            north_bound_net_buy: 北向净买入
+            north_bound_days: 连续净买入天数
+            margin_balance_change: 融资余额变化率
+            capital_resonance: 资金共振度
+            price_capital_divergence: 是否存在量价背离
+            signal: 信号
+            score: 评分
+
+        Returns:
+            LLM结构化输出字典
+        """
+        direction_map = {"inflow": "流入", "outflow": "流出", "neutral": "均衡"}
+
+        # 构建数据摘要（基于资金数据）
+        data_parts = [
+            f"股票={stock_data.stock_name}({stock_data.stock_code})",
+            f"当前价格={stock_data.current_price}",
+            f"主力净流入={main_force_net_inflow:.0f}万元",
+            f"主力方向={direction_map.get(main_force_direction, '未知')}",
+            f"北向净买入={north_bound_net_buy:.0f}万元",
+            f"北向连续买入天数={north_bound_days}",
+            f"融资余额变化率={margin_balance_change * 100:.2f}%",
+            f"资金共振度={capital_resonance * 100:.1f}%",
+            f"量价背离={'存在' if price_capital_divergence else '无'}",
+            f"信号={signal}",
+            f"评分={score}",
+        ]
+
+        data_summary = ", ".join(data_parts)
+
+        instruction = (
+            f"基于以上资金流向数据，对{stock_data.stock_name}的资金面进行深度解读。"
+            "请分析：1)主力资金和北向资金的动向含义；2)资金共振或背离的信号意义；"
+            "3)资金面可能对股价产生的影响。所有结论必须基于提供的数据，不得编造。"
+        )
+
+        output_fields = ["summary", "capital_flow_deep_analysis", "signal_interpretation"]
+
+        return self._call_llm_with_data(data_summary, instruction, output_fields)

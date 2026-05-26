@@ -75,7 +75,19 @@ class Trader(BaseAgent):
             stock_data, direction, position_size, entry_price,
             target_price, stop_loss, key_reasons, risk_factors
         )
-        
+
+        # LLM增强分析：生成交易决策逻辑说明
+        rationale = None
+        if self.llm:
+            try:
+                llm_result = self._llm_generate_rationale(
+                    stock_data, direction, debate, technical, fundamental, sentiment, news
+                )
+                if llm_result.get("rationale"):
+                    rationale = llm_result["rationale"]
+            except Exception as e:
+                logger.warning(f"[{self.name}] LLM增强分析失败，使用规则引擎结果: {e}")
+
         proposal = TradeProposal(
             direction=direction,
             position_size_pct=position_size,
@@ -87,7 +99,8 @@ class Trader(BaseAgent):
             time_horizon=time_horizon,
             key_reasons=key_reasons,
             risk_factors=risk_factors,
-            proposal_text=proposal_text
+            proposal_text=proposal_text,
+            rationale=rationale
         )
         
         logger.info(f"[{self.name}] 交易提案生成完成: {direction.value}")
@@ -372,3 +385,63 @@ class Trader(BaseAgent):
             lines.append("")
         
         return "\n".join(lines)
+
+    def _llm_generate_rationale(
+        self,
+        stock_data: StockData,
+        direction: Signal,
+        debate: DebateResult,
+        technical: TechnicalAnalysis,
+        fundamental: FundamentalAnalysis,
+        sentiment: SentimentAnalysis,
+        news: NewsAnalysis
+    ) -> Dict[str, str]:
+        """
+        使用LLM生成交易决策逻辑说明
+
+        LLM必须基于多空辩论结果和风险评估
+
+        Args:
+            stock_data: 股票数据
+            direction: 交易方向
+            debate: 辩论结果
+            technical: 技术分析结果
+            fundamental: 基本面分析结果
+            sentiment: 情绪分析结果
+            news: 新闻分析结果
+
+        Returns:
+            LLM结构化输出字典
+        """
+        # 构建数据摘要（基于多空辩论结果和各维度信号）
+        data_parts = [
+            f"股票={stock_data.stock_name}({stock_data.stock_code})",
+            f"当前价格={stock_data.current_price}",
+            f"交易方向={direction.value}",
+            f"辩论获胜方={debate.winning_side}",
+            f"多头置信度={debate.bull_confidence}",
+            f"空头置信度={debate.bear_confidence}",
+            f"技术信号={technical.signal.value}",
+            f"基本面信号={fundamental.signal.value}",
+            f"情绪信号={sentiment.signal.value}",
+            f"新闻信号={news.signal.value}",
+        ]
+
+        # 添加辩论论据
+        if debate.bull_arguments:
+            data_parts.append(f"多头论据={'；'.join(debate.bull_arguments[:3])}")
+        if debate.bear_arguments:
+            data_parts.append(f"空头论据={'；'.join(debate.bear_arguments[:3])}")
+
+        data_summary = ", ".join(data_parts)
+
+        instruction = (
+            f"基于以上多空辩论结果和各维度分析数据，为{stock_data.stock_name}的"
+            f"交易决策（{direction.value}）生成逻辑说明。"
+            "请说明：1)为何做出此交易决策；2)决策的核心依据；3)需要关注的风险。"
+            "所有论述必须基于提供的数据，不得编造。"
+        )
+
+        output_fields = ["rationale", "decision_logic", "risk_considerations"]
+
+        return self._call_llm_with_data(data_summary, instruction, output_fields)

@@ -77,6 +77,17 @@ class FundamentalAnalyst(BaseAgent):
             valuation_analysis, financial_health_analysis, signal
         )
 
+        # LLM增强分析：基于真实财务数据进行深度解读
+        if self.llm:
+            try:
+                llm_insight = self._llm_enhance_analysis(
+                    stock_data, metrics, signal
+                )
+                if llm_insight.get("summary"):
+                    summary = llm_insight["summary"]
+            except Exception as e:
+                logger.warning(f"[{self.name}] LLM增强分析失败，使用规则引擎结果: {e}")
+
         analysis = FundamentalAnalysis(
             profitability_score=profitability_score,
             profitability_analysis=profitability_analysis,
@@ -473,3 +484,54 @@ class FundamentalAnalyst(BaseAgent):
         ]
 
         return "\n".join(lines)
+
+    def _llm_enhance_analysis(
+        self,
+        stock_data: StockData,
+        metrics: Dict,
+        signal: Signal
+    ) -> Dict[str, str]:
+        """
+        使用LLM对财务数据进行深度解读
+
+        基于PE/PB/ROE等真实数据，调用LLM生成深度分析
+
+        Args:
+            stock_data: 股票数据
+            metrics: 关键财务指标字典
+            signal: 交易信号
+
+        Returns:
+            LLM结构化输出字典
+        """
+        # 构建数据摘要（只包含真实数据）
+        data_parts = [
+            f"股票={stock_data.stock_name}({stock_data.stock_code})",
+            f"行业={stock_data.industry or '未知'}",
+            f"PE_TTM={metrics.get('pe_ttm', 'N/A')}",
+            f"PB={metrics.get('pb', 'N/A')}",
+            f"PS_TTM={metrics.get('ps_ttm', 'N/A')}",
+            f"股息率={metrics.get('dividend_yield', 'N/A')}",
+            f"市值={metrics.get('market_cap', 'N/A')}",
+            f"ROE={metrics.get('roe', 'N/A')}",
+            f"ROA={metrics.get('roa', 'N/A')}",
+            f"毛利率={metrics.get('gross_margin', 'N/A')}",
+            f"净利率={metrics.get('net_margin', 'N/A')}",
+            f"负债率={metrics.get('debt_ratio', 'N/A')}",
+            f"营收增长率={metrics.get('revenue_growth', 'N/A')}",
+            f"利润增长率={metrics.get('profit_growth', 'N/A')}",
+            f"ROE变化={metrics.get('roe_change', 'N/A')}",
+            f"信号={signal.value}",
+        ]
+
+        data_summary = ", ".join(data_parts)
+
+        instruction = (
+            f"基于以上财务数据，对{stock_data.stock_name}的基本面进行深度解读。"
+            "请分析：1)公司盈利能力和成长性评估；2)估值是否合理；3)财务风险点。"
+            "所有结论必须基于提供的数据，不得编造财务数据。"
+        )
+
+        output_fields = ["summary", "valuation_assessment", "risk_warnings"]
+
+        return self._call_llm_with_data(data_summary, instruction, output_fields)
