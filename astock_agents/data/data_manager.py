@@ -137,7 +137,7 @@ class DataManager:
                 keys = klines.get("keys", [])
                 rows = klines.get("rows", [])
                 
-                for row in rows[-60:]:  # 最近60天
+                for row in rows[-250:]:  # 最近250天
                     if not row:
                         continue
                     
@@ -199,11 +199,23 @@ class DataManager:
     
     def _fetch_news_data(self, stock: StockData, code: str):
         """获取新闻公告数据"""
+        # 获取新闻数据并写入 stock.recent_news
         try:
             news = self.news.get_stock_news(code, limit=5)
-            logger.debug(f"[DataManager] 新闻数据: {len(news)}条")
+            if news:
+                stock.recent_news = news
+            logger.debug(f"[DataManager] 新闻数据: {len(news) if news else 0}条")
         except Exception as e:
             logger.warning(f"[DataManager] 获取新闻数据失败: {e}")
+
+        # 获取公告数据并写入 stock.recent_announcements
+        try:
+            announcements = self.news.get_announcements(code, limit=5)
+            if announcements:
+                stock.recent_announcements = announcements
+            logger.debug(f"[DataManager] 公告数据: {len(announcements) if announcements else 0}条")
+        except Exception as e:
+            logger.warning(f"[DataManager] 获取公告数据失败: {e}")
     
     # ==================== 特色数据接口 ====================
     

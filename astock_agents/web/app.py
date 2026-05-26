@@ -55,7 +55,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -76,6 +76,12 @@ def _load_config() -> Dict[str, Any]:
         with open(config_path, "r", encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
     return {}
+
+
+def _get_db():
+    """懒加载数据库实例"""
+    from astock_agents.db.database import Database
+    return Database()
 
 
 def _get_workflow():
@@ -309,6 +315,19 @@ async def analyze_stock(request: Request, body: AnalysisRequest):
         except Exception:
             pass  # 指标记录不应影响主流程
 
+        # 持久化分析结果到数据库
+        try:
+            _db = _get_db()
+            _db.save_analysis(
+                stock_code=validated_code,
+                stock_name=report.stock_name,
+                signal=report.final_signal.value if report.final_signal else "未知",
+                confidence=report.final_confidence or 0,
+                report_json=report.model_dump_json(),
+            )
+        except Exception as e:
+            logger.warning(f"[Web] 分析结果持久化失败: {e}")
+
         return response
 
     except Exception as e:
@@ -358,11 +377,13 @@ _review = None
 
 
 def _get_screener():
-    """懒加载选股器"""
+    """懒加载选股器（注入DataManager实例）"""
     global _screener
     if _screener is None:
         from astock_agents.services.screener import StockScreener
-        _screener = StockScreener()
+        from astock_agents.data.manager import DataManager
+        dm = DataManager()
+        _screener = StockScreener(data_manager=dm)
     return _screener
 
 
@@ -385,11 +406,13 @@ def _get_paper_trading():
 
 
 def _get_review():
-    """懒加载复盘服务"""
+    """懒加载复盘服务（注入Database实例）"""
     global _review
     if _review is None:
         from astock_agents.services.review import ReviewService
-        _review = ReviewService()
+        from astock_agents.db.database import Database
+        db = Database()
+        _review = ReviewService(db=db)
     return _review
 
 
@@ -529,7 +552,12 @@ async def get_portfolio(request: Request):
     """获取投资组合"""
     pt = _get_paper_trading()
     portfolio = pt.get_portfolio()
-    return portfolio.model_dump()
+    portfolio_data = portfolio.model_dump()
+    # 字段映射：后端字段名 → 前端期望的字段名
+    portfolio_data["cash"] = portfolio_data.pop("available_cash", 0)
+    portfolio_data["total_value"] = portfolio_data.pop("total_market_value", 0)
+    portfolio_data["total_return_pct"] = portfolio_data.pop("total_pnl_pct", 0)
+    return portfolio_data
 
 
 @app.post("/api/trading/order")
@@ -869,7 +897,8 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+@app.websocket("/ws/{task_id}")
+async def websocket_endpoint(websocket: WebSocket, task_id: str = ""):
     """WebSocket实时推送端点 - 分析进度、智能体状态、信号变化"""
     from astock_agents.web.websocket import get_connection_manager
     manager = get_connection_manager()

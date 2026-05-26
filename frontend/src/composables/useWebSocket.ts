@@ -35,7 +35,7 @@ export function useWebSocket() {
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
-    const url = `${protocol}//${host}/ws/${taskId}`;
+    const url = `${protocol}//${host}/ws`;
 
     try {
       wsInstance = new WebSocket(url);
