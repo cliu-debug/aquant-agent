@@ -196,7 +196,7 @@ function createAgentOrb(agent: Agent, position: THREE.Vector3): THREE.Group {
 
   const color = new THREE.Color(getAgentColor(agent.type))
 
-  const geometry = new THREE.SphereGeometry(0.55, 32, 32)
+  const geometry = new THREE.SphereGeometry(0.55, 16, 16)
   const material = new THREE.MeshPhongMaterial({
     color: color,
     emissive: color,
@@ -209,7 +209,7 @@ function createAgentOrb(agent: Agent, position: THREE.Vector3): THREE.Group {
   sphere.name = 'orb'
   group.add(sphere)
 
-  const glowGeometry = new THREE.SphereGeometry(0.75, 32, 32)
+  const glowGeometry = new THREE.SphereGeometry(0.75, 16, 16)
   const glowMaterial = new THREE.MeshBasicMaterial({
     color: color,
     transparent: true,
@@ -277,7 +277,7 @@ function createConnections(): void {
  * 创建粒子背景效果
  */
 function createParticles(): void {
-  const particleCount = 300
+  const particleCount = 100
   const geometry = new THREE.BufferGeometry()
   const positions = new Float32Array(particleCount * 3)
 
@@ -403,10 +403,10 @@ function updateAgentVisual(agent: Agent): void {
 }
 
 /**
- * 动画循环
+ * 动画循环（限制30fps以降低GPU负载）
  */
 function animate(): void {
-  animationFrameId = requestAnimationFrame(animate)
+  animationFrameId = window.setTimeout(animate, 33) // ~30fps
 
   const time = Date.now()
 
@@ -475,7 +475,7 @@ function initScene(): void {
     alpha: true,
   })
   renderer.setSize(width, height)
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1))
 
   controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = true
@@ -511,7 +511,7 @@ function initScene(): void {
  * 清理 Three.js 资源
  */
 function cleanup(): void {
-  cancelAnimationFrame(animationFrameId)
+  clearTimeout(animationFrameId)
 
   if (containerRef.value) {
     containerRef.value.removeEventListener('click', handleClick)

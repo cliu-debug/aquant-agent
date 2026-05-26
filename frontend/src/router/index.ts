@@ -69,12 +69,7 @@ const router = createRouter({
       component: () => import('@/views/CapitalFlowView.vue'),
       meta: { title: '资金流向' },
     },
-    {
-      path: '/sentiment',
-      name: 'sentiment',
-      component: () => import('@/views/SentimentView.vue'),
-      meta: { title: '市场情绪' },
-    },
+
     {
       path: '/position-sizing',
       name: 'positionSizing',

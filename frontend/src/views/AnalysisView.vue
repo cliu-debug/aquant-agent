@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, defineAsyncComponent } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { AgentStatus, WorkflowStage, LogLevel, Signal, RiskLevel } from '@/types/agent'
 import type { Agent, AgentOutput } from '@/types/agent'
 import { analyzeStock, getPopularStocks, getAnalysisHistory, type AnalyzeResponse, type PopularStock } from '@/services/api'
 import { getSectorRotation, type SectorRotationResult } from '@/services/api'
 
-import AgentScene from '@/components/visualization/AgentScene.vue'
+const AgentScene = defineAsyncComponent(() => import('@/components/visualization/AgentScene.vue'))
 import WorkflowGraph from '@/components/workflow/WorkflowGraph.vue'
 import AgentCard from '@/components/agents/AgentCard.vue'
 import LogConsole from '@/components/dashboard/LogConsole.vue'

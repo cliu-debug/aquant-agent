@@ -8,6 +8,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 echarts.use([HeatmapChart, GridComponent, TooltipComponent, VisualMapComponent, TitleComponent, CanvasRenderer])
 import {
   getSectorRotation,
+  getMarketSentiment,
   type SectorRotationResult,
   type SectorHeatmapItem,
 } from '@/services/api'
@@ -16,6 +17,8 @@ import {
 const heatmapData = ref<SectorHeatmapItem[]>([])
 /** 行业轮动分析结果 */
 const rotationResult = ref<SectorRotationResult | null>(null)
+/** 情绪数据（来自 getMarketSentiment API） */
+const sentimentData = ref<Record<string, unknown> | null>(null)
 /** 加载状态 */
 const loading = ref(false)
 /** 错误信息 */
@@ -25,8 +28,20 @@ let chartInstance: echarts.ECharts | null = null
 /** 热力图容器 ref */
 const heatmapChartRef = ref<HTMLDivElement | null>(null)
 
-/** 恐贪指数（基于行业热度综合计算） */
+/** 恐贪指数（优先使用情绪API数据，回退到行业热度计算） */
 const fearGreedIndex = computed((): number => {
+  // 优先使用情绪 API 返回的恐贪指数
+  if (sentimentData.value) {
+    const val = sentimentData.value.fear_greed_index
+      ?? sentimentData.value.fear_greed
+      ?? sentimentData.value.index
+      ?? sentimentData.value.score
+    if (val != null) {
+      const num = Number(val)
+      if (!isNaN(num)) return Math.round(Math.max(0, Math.min(100, num)))
+    }
+  }
+  // 回退：基于行业热度综合计算
   if (!heatmapData.value.length) return 50
   const avgHeat = heatmapData.value.reduce((sum, item) => sum + item.heat_score, 0) / heatmapData.value.length
   return Math.round(Math.max(0, Math.min(100, avgHeat)))
@@ -50,6 +65,48 @@ const sentimentLabel = computed((): string => {
   if (idx >= 40) return '中性'
   if (idx >= 20) return '恐惧'
   return '极度恐惧'
+})
+
+/** 情绪描述（来自情绪 API） */
+const sentimentDescription = computed((): string => {
+  if (!sentimentData.value) return ''
+  return String(
+    sentimentData.value.description
+    ?? sentimentData.value.summary
+    ?? sentimentData.value.analysis
+    ?? ''
+  )
+})
+
+/** 情绪分项指标（来自情绪 API） */
+const sentimentMetrics = computed((): Array<{ label: string; value: number; key: string }> => {
+  if (!sentimentData.value) return []
+  const items: Array<{ label: string; value: number; key: string }> = []
+  const data = sentimentData.value
+
+  const metricMap: Record<string, string> = {
+    market_breadth: '市场宽度',
+    volatility: '波动率',
+    momentum: '动量',
+    volume: '成交量',
+    safe_haven_demand: '避险需求',
+    junk_bond_demand: '垃圾债需求',
+    put_call_ratio: '认沽认购比',
+    market_momentum: '市场动量',
+    stock_strength: '股票强度',
+  }
+
+  for (const [key, label] of Object.entries(metricMap)) {
+    const val = data[key]
+    if (val != null) {
+      const num = Number(val)
+      if (!isNaN(num)) {
+        items.push({ label, value: Math.max(0, Math.min(100, num)), key })
+      }
+    }
+  }
+
+  return items
 })
 
 /** 涨跌行业统计 */
@@ -80,14 +137,31 @@ onUnmounted(() => {
   }
 })
 
-/** 加载行业轮动数据 */
+/** 加载行业轮动数据与市场情绪数据 */
 async function loadData(): Promise<void> {
   loading.value = true
   error.value = null
   try {
-    const res = await getSectorRotation()
-    rotationResult.value = res.data
-    heatmapData.value = res.data.heatmap || []
+    // 并行请求行业轮动和情绪数据
+    const [rotationRes, sentimentRes] = await Promise.allSettled([
+      getSectorRotation(),
+      getMarketSentiment(),
+    ])
+
+    // 处理行业轮动结果
+    if (rotationRes.status === 'fulfilled') {
+      rotationResult.value = rotationRes.value.data
+      heatmapData.value = rotationRes.value.data.heatmap || []
+    } else {
+      error.value = rotationRes.reason instanceof Error ? rotationRes.reason.message : '行业数据加载失败'
+    }
+
+    // 处理情绪数据结果
+    if (sentimentRes.status === 'fulfilled') {
+      sentimentData.value = sentimentRes.value?.data ?? sentimentRes.value ?? null
+    }
+    // 情绪数据加载失败不阻塞页面
+
     await nextTick()
     updateChart()
   } catch (e) {
@@ -221,6 +295,14 @@ function formatChange(pct: number): string {
   const sign = pct > 0 ? '+' : ''
   return `${sign}${pct.toFixed(2)}%`
 }
+
+/** 情绪分项指标颜色 */
+function metricColor(value: number): string {
+  if (value >= 70) return '#00B96B'
+  if (value >= 50) return '#8BC34A'
+  if (value >= 30) return '#FAAD14'
+  return '#F5222D'
+}
 </script>
 
 <template>
@@ -266,11 +348,34 @@ function formatChange(pct: number): string {
         <div class="gauge-label" :style="{ color: fearGreedColor }">{{ sentimentLabel }}</div>
       </div>
 
-      <!-- 市场情绪状态 -->
-      <div class="metric-card">
-        <div class="metric-label">市场情绪</div>
-        <div class="metric-value" :style="{ color: fearGreedColor }">{{ sentimentLabel }}</div>
-        <div class="metric-sub">基于28个行业综合评估</div>
+      <!-- 情绪温度计 -->
+      <div class="metric-card thermometer-card">
+        <div class="metric-label">情绪温度计</div>
+        <div class="thermometer">
+          <div class="thermo-scale">
+            <span class="thermo-tick" style="bottom: 0%">0</span>
+            <span class="thermo-tick" style="bottom: 25%">25</span>
+            <span class="thermo-tick" style="bottom: 50%">50</span>
+            <span class="thermo-tick" style="bottom: 75%">75</span>
+            <span class="thermo-tick" style="bottom: 100%">100</span>
+          </div>
+          <div class="thermo-bar-bg">
+            <div
+              class="thermo-bar-fill"
+              :style="{
+                height: `${fearGreedIndex}%`,
+                background: `linear-gradient(to top, #F5222D, #FF9800, #FAAD14, #8BC34A, #00B96B)`
+              }"
+            ></div>
+          </div>
+          <div class="thermo-labels">
+            <span class="thermo-label-item" style="bottom: 10%">极度恐惧</span>
+            <span class="thermo-label-item" style="bottom: 35%">恐惧</span>
+            <span class="thermo-label-item" style="bottom: 55%">中性</span>
+            <span class="thermo-label-item" style="bottom: 75%">贪婪</span>
+            <span class="thermo-label-item" style="bottom: 92%">极度贪婪</span>
+          </div>
+        </div>
       </div>
 
       <!-- 涨跌统计 -->
@@ -298,6 +403,40 @@ function formatChange(pct: number): string {
         <div class="metric-value cycle-value">{{ rotationResult.current_cycle }}</div>
         <div class="metric-sub">{{ rotationResult.cycle_description }}</div>
       </div>
+    </div>
+
+    <!-- 情绪分项指标 -->
+    <div v-if="sentimentMetrics.length" class="section-card">
+      <h3 class="section-title">分项指标</h3>
+      <div class="metrics-list">
+        <div
+          v-for="metric in sentimentMetrics"
+          :key="metric.key"
+          class="metric-row"
+        >
+          <div class="metric-name">{{ metric.label }}</div>
+          <div class="metric-bar-wrapper">
+            <div class="metric-bar-bg">
+              <div
+                class="metric-bar-fill"
+                :style="{
+                  width: `${metric.value}%`,
+                  background: metricColor(metric.value)
+                }"
+              ></div>
+            </div>
+          </div>
+          <div class="metric-score" :style="{ color: metricColor(metric.value) }">
+            {{ metric.value }}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 情绪分析文本 -->
+    <div v-if="sentimentDescription" class="section-card">
+      <h3 class="section-title">情绪分析</h3>
+      <div class="analysis-text">{{ sentimentDescription }}</div>
     </div>
 
     <!-- 行业热力图 -->
@@ -397,7 +536,7 @@ function formatChange(pct: number): string {
 
 .top-metrics {
   display: grid;
-  grid-template-columns: 200px repeat(3, 1fr);
+  grid-template-columns: 200px 160px repeat(2, 1fr);
   gap: 12px;
 }
 
@@ -460,6 +599,68 @@ function formatChange(pct: number): string {
   margin-top: 4px;
 }
 
+/* 情绪温度计 */
+.thermometer-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.thermometer {
+  display: flex;
+  gap: 8px;
+  position: relative;
+  height: 120px;
+}
+
+.thermo-scale {
+  position: relative;
+  height: 100%;
+  width: 20px;
+}
+
+.thermo-tick {
+  position: absolute;
+  right: 0;
+  font-size: 10px;
+  color: var(--color-text-muted);
+  transform: translateY(50%);
+}
+
+.thermo-bar-bg {
+  width: 20px;
+  height: 100%;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  overflow: hidden;
+  position: relative;
+}
+
+.thermo-bar-fill {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  border-radius: 10px;
+  transition: height 0.6s ease;
+}
+
+.thermo-labels {
+  position: relative;
+  height: 100%;
+  width: 60px;
+}
+
+.thermo-label-item {
+  position: absolute;
+  left: 0;
+  font-size: 10px;
+  color: var(--color-text-muted);
+  transform: translateY(50%);
+  white-space: nowrap;
+}
+
 /* 涨跌统计 */
 .stats-row {
   display: flex;
@@ -500,6 +701,59 @@ function formatChange(pct: number): string {
   font-weight: 600;
   color: var(--color-text-primary);
   margin-bottom: 12px;
+}
+
+/* 分项指标 */
+.metrics-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.metric-row {
+  display: grid;
+  grid-template-columns: 100px 1fr 40px;
+  gap: 12px;
+  align-items: center;
+}
+
+.metric-name {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.metric-bar-wrapper {
+  flex: 1;
+}
+
+.metric-bar-bg {
+  width: 100%;
+  height: 8px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.metric-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.6s ease;
+}
+
+.metric-score {
+  font-size: 14px;
+  font-weight: 700;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 分析文本 */
+.analysis-text {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+  white-space: pre-wrap;
 }
 
 /* 热力图 */
@@ -641,6 +895,13 @@ function formatChange(pct: number): string {
   color: var(--color-text-muted);
 }
 
+.empty-state {
+  text-align: center;
+  padding: 20px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
 @media (max-width: 1024px) {
   .top-metrics {
     grid-template-columns: repeat(2, 1fr);
@@ -659,6 +920,9 @@ function formatChange(pct: number): string {
   }
   .heatmap-chart {
     height: 240px;
+  }
+  .metric-row {
+    grid-template-columns: 80px 1fr 36px;
   }
 }
 </style>

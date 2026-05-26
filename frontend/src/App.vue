@@ -74,12 +74,7 @@ const navItems = [
     label: '资金流向',
     icon: 'capital-flow',
   },
-  {
-    path: '/sentiment',
-    name: 'sentiment',
-    label: '市场情绪',
-    icon: 'sentiment',
-  },
+
   {
     path: '/position-sizing',
     name: 'positionSizing',
@@ -178,10 +173,7 @@ function navigateTo(path: string) {
           <svg v-else-if="item.icon === 'capital-flow'" class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 2v20M17 7l-5-5-5 5"/><path d="M7 17l5 5 5-5"/>
           </svg>
-          <!-- 市场情绪 -->
-          <svg v-else-if="item.icon === 'sentiment'" class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/>
-          </svg>
+
           <!-- 仓位计算 -->
           <svg v-else-if="item.icon === 'position-sizing'" class="nav-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
