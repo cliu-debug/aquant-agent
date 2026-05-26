@@ -480,3 +480,49 @@ export async function healthCheck(): Promise<{
 }> {
   return request('/api/health')
 }
+
+// ==================== 行业轮动 API ====================
+
+/** 行业热力图条目 */
+export interface SectorHeatmapItem {
+  sector_name: string
+  change_pct: number
+  volume_ratio: number
+  capital_flow: number
+  heat_score: number
+}
+
+/** 行业推荐条目 */
+export interface SectorRecommendation {
+  sector_name: string
+  rank: number
+  reason: string
+  matching_stocks: string[]
+  weight: number
+}
+
+/** 行业轮动分析结果 */
+export interface SectorRotationResult {
+  current_cycle: string
+  cycle_description: string
+  heatmap: SectorHeatmapItem[]
+  recommendations: SectorRecommendation[]
+  rotation_signal: string
+  summary: string
+}
+
+/** 行业轮动分析 - GET /api/sector/rotation */
+export async function getSectorRotation(): Promise<{
+  success: boolean
+  data: SectorRotationResult
+}> {
+  return request('/api/sector/rotation')
+}
+
+/** 行业热力图 - GET /api/sector/heatmap */
+export async function getSectorHeatmap(): Promise<{
+  success: boolean
+  data: SectorHeatmapItem[]
+}> {
+  return request('/api/sector/heatmap')
+}

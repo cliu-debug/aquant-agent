@@ -4,6 +4,7 @@ import { useAgentStore } from '@/stores/agentStore'
 import { AgentStatus, WorkflowStage, LogLevel, Signal, RiskLevel } from '@/types/agent'
 import type { Agent, AgentOutput } from '@/types/agent'
 import { analyzeStock, getPopularStocks, type AnalyzeResponse, type PopularStock } from '@/services/api'
+import { getSectorRotation, type SectorRotationResult } from '@/services/api'
 
 import AgentScene from '@/components/visualization/AgentScene.vue'
 import WorkflowGraph from '@/components/workflow/WorkflowGraph.vue'
@@ -19,6 +20,8 @@ const selectedAgent = ref<Agent | null>(null)
 const show3D = ref(true)
 const analysisError = ref<string | null>(null)
 const popularStocks = ref<PopularStock[]>([])
+const sectorRotation = ref<SectorRotationResult | null>(null)
+const sectorLoading = ref(false)
 
 const isAnalyzing = computed(() => store.isRunning)
 const overallProgress = computed(() => store.overallProgress)
@@ -272,6 +275,19 @@ function fillStock(code: string, name: string): void {
   stockCode.value = code
   stockName.value = name
 }
+
+/** 加载行业轮动决策建议 */
+async function loadSectorRotation(): Promise<void> {
+  sectorLoading.value = true
+  try {
+    const res = await getSectorRotation()
+    sectorRotation.value = res.data
+  } catch (e) {
+    addSystemLog(`行业轮动数据加载失败: ${e instanceof Error ? e.message : '未知错误'}`, LogLevel.WARNING)
+  } finally {
+    sectorLoading.value = false
+  }
+}
 </script>
 
 <template>
@@ -363,6 +379,55 @@ function fillStock(code: string, name: string): void {
         <Transition name="slide">
           <ResultCard v-if="store.finalResult" :result="store.finalResult" />
         </Transition>
+
+        <!-- 决策建议面板 -->
+        <div v-if="store.finalResult" class="decision-panel">
+          <div class="decision-header">
+            <h3 class="decision-title">决策建议</h3>
+            <button class="btn-secondary btn-sm" @click="loadSectorRotation" :disabled="sectorLoading">
+              {{ sectorLoading ? '加载中...' : '获取行业建议' }}
+            </button>
+          </div>
+
+          <div v-if="sectorRotation" class="decision-content">
+            <!-- 经济周期 -->
+            <div class="cycle-badge">
+              <span class="cycle-label">当前周期</span>
+              <span class="cycle-value">{{ sectorRotation.current_cycle }}</span>
+            </div>
+
+            <!-- 轮动信号 -->
+            <div class="rotation-signal">
+              <span class="signal-label">轮动信号</span>
+              <span class="signal-text">{{ sectorRotation.rotation_signal }}</span>
+            </div>
+
+            <!-- 推荐行业列表 -->
+            <div v-if="sectorRotation.recommendations.length" class="recommendation-list">
+              <div
+                v-for="rec in sectorRotation.recommendations"
+                :key="rec.sector_name"
+                class="recommendation-item"
+              >
+                <div class="rec-rank">{{ rec.rank }}</div>
+                <div class="rec-info">
+                  <div class="rec-name">{{ rec.sector_name }}</div>
+                  <div class="rec-reason">{{ rec.reason }}</div>
+                  <div class="rec-stocks" v-if="rec.matching_stocks.length">
+                    <span class="stock-tag" v-for="code in rec.matching_stocks.slice(0, 3)" :key="code">{{ code }}</span>
+                  </div>
+                </div>
+                <div class="rec-weight">{{ (rec.weight * 100).toFixed(0) }}%</div>
+              </div>
+            </div>
+
+            <div v-else class="empty-recommendation">暂无推荐行业</div>
+          </div>
+
+          <div v-else-if="!sectorLoading" class="decision-empty">
+            点击"获取行业建议"查看当前经济周期下的行业配置建议
+          </div>
+        </div>
       </div>
     </div>
 
@@ -495,6 +560,158 @@ function fillStock(code: string, name: string): void {
 }
 .error-text { flex: 1; color: var(--color-negative); font-size: 13px; }
 .error-close { background: none; border: none; color: var(--color-text-muted); cursor: pointer; font-size: 16px; padding: 2px 6px; }
+
+/* 决策建议面板 */
+.decision-panel {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.decision-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.decision-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.btn-sm {
+  padding: 4px 12px;
+  font-size: 12px;
+}
+
+.decision-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cycle-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(37, 99, 235, 0.08);
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  border-radius: var(--radius);
+}
+
+.cycle-label {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.cycle-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-accent);
+}
+
+.rotation-signal {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  background: var(--color-bg-primary);
+  border-radius: var(--radius);
+}
+
+.signal-label {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.signal-text {
+  font-size: 13px;
+  color: var(--color-text-primary);
+  line-height: 1.5;
+}
+
+.recommendation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.recommendation-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.rec-rank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.rec-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.rec-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: 2px;
+}
+
+.rec-reason {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+  margin-bottom: 4px;
+}
+
+.rec-stocks {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.stock-tag {
+  padding: 1px 6px;
+  background: var(--color-bg-hover);
+  border: 1px solid var(--color-border);
+  border-radius: 2px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.rec-weight {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.empty-recommendation,
+.decision-empty {
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  padding: 16px 0;
+}
 
 @media (max-width: 1400px) { .agents-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 1024px) {

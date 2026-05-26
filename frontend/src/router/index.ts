@@ -51,6 +51,12 @@ const router = createRouter({
       component: () => import('@/views/MacroView.vue'),
       meta: { title: '宏观分析' },
     },
+    {
+      path: '/market',
+      name: 'market',
+      component: () => import('@/views/MarketView.vue'),
+      meta: { title: '市场总览' },
+    },
   ],
 })
 
