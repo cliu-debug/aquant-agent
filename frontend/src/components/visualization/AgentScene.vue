@@ -211,27 +211,27 @@ function createAgentOrb(agent: Agent, position: THREE.Vector3): THREE.Group {
 
   const color = new THREE.Color(getAgentColor(agent.type))
 
-  // 核心球体 - 使用IcosahedronGeometry更科技感
-  const coreGeometry = new THREE.IcosahedronGeometry(0.5, 1)
-  const coreMaterial = new THREE.MeshPhongMaterial({
+  // 核心球体 - 高细分SphereGeometry确保清晰
+  const coreGeometry = new THREE.SphereGeometry(0.5, 32, 32)
+  const coreMaterial = new THREE.MeshStandardMaterial({
     color: color,
     emissive: color,
     emissiveIntensity: 0.15,
     transparent: true,
-    opacity: 0.92,
-    shininess: 80,
-    wireframe: false,
+    opacity: 0.95,
+    roughness: 0.3,
+    metalness: 0.6,
   })
   const core = new THREE.Mesh(coreGeometry, coreMaterial)
   core.name = 'orb'
   group.add(core)
 
   // 线框外壳 - 科技感
-  const wireGeometry = new THREE.IcosahedronGeometry(0.58, 1)
+  const wireGeometry = new THREE.IcosahedronGeometry(0.6, 2)
   const wireMaterial = new THREE.MeshBasicMaterial({
     color: color,
     transparent: true,
-    opacity: 0.12,
+    opacity: 0.15,
     wireframe: true,
   })
   const wireframe = new THREE.Mesh(wireGeometry, wireMaterial)
@@ -392,7 +392,7 @@ function updateAgentVisual(agent: Agent): void {
   const label = group.getObjectByName('label') as THREE.Sprite | undefined
   if (!orb) return
 
-  const material = orb.material as THREE.MeshPhongMaterial
+  const material = orb.material as THREE.MeshStandardMaterial
   const color = new THREE.Color(getAgentColor(agent.type))
 
   switch (agent.status) {
@@ -466,7 +466,7 @@ function isConnectionActive(fromIdx: number, toIdx: number): boolean {
 
 /** 动画循环 */
 function animate(): void {
-  animationFrameId = window.setTimeout(animate, 33)
+  animationFrameId = requestAnimationFrame(animate)
 
   const time = Date.now()
   const positions = getAgentPositions(props.agents.length)
@@ -487,7 +487,7 @@ function animate(): void {
       group.position.y = baseY + Math.sin(time * 0.003) * 0.12
 
       if (orb) {
-        const mat = orb.material as THREE.MeshPhongMaterial
+        const mat = orb.material as THREE.MeshStandardMaterial
         mat.emissiveIntensity = 0.3 + Math.sin(time * 0.005) * 0.2
         // 核心球体缓慢自转
         orb.rotation.y += 0.008
@@ -525,7 +525,7 @@ function animate(): void {
     } else if (agent.status === AgentStatus.COMPLETED) {
       // 完成：轻微呼吸
       if (orb) {
-        const mat = orb.material as THREE.MeshPhongMaterial
+        const mat = orb.material as THREE.MeshStandardMaterial
         mat.emissiveIntensity = 0.2 + Math.sin(time * 0.002) * 0.05
       }
       if (wireframe) { wireframe.rotation.y += 0.002 }
@@ -534,7 +534,7 @@ function animate(): void {
     } else if (agent.status === AgentStatus.WAITING) {
       // 等待：微弱呼吸
       if (orb) {
-        const mat = orb.material as THREE.MeshPhongMaterial
+        const mat = orb.material as THREE.MeshStandardMaterial
         mat.emissiveIntensity = 0.05 + Math.sin(time * 0.001) * 0.03
       }
       if (pulseRing) { (pulseRing.material as THREE.MeshBasicMaterial).opacity = 0 }
@@ -623,7 +623,9 @@ function initScene(): void {
     alpha: true,
   })
   renderer.setSize(width, height)
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1))
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+  renderer.toneMapping = THREE.ACESFilmicToneMapping
+  renderer.toneMappingExposure = 1.2
 
   controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = true
@@ -632,14 +634,18 @@ function initScene(): void {
   controls.maxDistance = 30
   controls.enablePan = false
 
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.4)
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.6)
   scene.add(ambientLight)
 
-  const pointLight1 = new THREE.PointLight(0x3b82f6, 1.5, 50)
+  const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8)
+  directionalLight.position.set(5, 10, 7)
+  scene.add(directionalLight)
+
+  const pointLight1 = new THREE.PointLight(0x3b82f6, 1.2, 50)
   pointLight1.position.set(10, 10, 10)
   scene.add(pointLight1)
 
-  const pointLight2 = new THREE.PointLight(0x8b5cf6, 0.8, 50)
+  const pointLight2 = new THREE.PointLight(0x8b5cf6, 0.6, 50)
   pointLight2.position.set(-10, -5, 8)
   scene.add(pointLight2)
 
@@ -656,7 +662,7 @@ function initScene(): void {
 }
 
 function cleanup(): void {
-  clearTimeout(animationFrameId)
+  cancelAnimationFrame(animationFrameId)
 
   if (containerRef.value) {
     containerRef.value.removeEventListener('click', handleClick)
