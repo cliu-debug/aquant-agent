@@ -640,3 +640,154 @@ export async function calculatePositionSizing(params: PositionSizingParams): Pro
 export async function getWebSocketStatus(): Promise<any> {
   return request('/api/ws/status')
 }
+
+// ==================== LLM 配置 API ====================
+
+/** LLM 提供商配置 */
+export interface LLMProviderConfig {
+  provider: string
+  model: string
+  api_key_set: boolean
+  api_key_masked: string
+  status: 'connected' | 'disconnected' | 'unknown'
+  [key: string]: unknown
+}
+
+/** LLM 配置响应 */
+export interface LLMConfigResponse {
+  providers: LLMProviderConfig[]
+  [key: string]: unknown
+}
+
+/** 获取 LLM 配置 - GET /api/llm/config */
+export async function getLLMConfig(): Promise<LLMConfigResponse> {
+  return request('/api/llm/config')
+}
+
+/** LLM 连接测试响应 */
+export interface LLMTestResponse {
+  success: boolean
+  message: string
+  latency_ms?: number
+  [key: string]: unknown
+}
+
+/** 测试 LLM 连接 - POST /api/llm/test */
+export async function testLLMConnection(provider: string): Promise<LLMTestResponse> {
+  return request('/api/llm/test', {
+    method: 'POST',
+    body: JSON.stringify({ provider }),
+  })
+}
+
+// ==================== 记忆系统 API ====================
+
+/** 用户投资画像 */
+export interface MemoryProfile {
+  preferred_industries: string[]
+  risk_preference: string
+  holding_period: string
+  analysis_count: number
+  [key: string]: unknown
+}
+
+/** 获取用户投资画像 - GET /api/memory/profile */
+export async function getMemoryProfile(): Promise<{ success: boolean; data: MemoryProfile }> {
+  return request('/api/memory/profile')
+}
+
+/** 股票历史记忆 */
+export interface StockMemory {
+  stock_code: string
+  stock_name: string
+  memories: Array<{
+    date: string
+    signal: string
+    confidence: number
+    summary: string
+    [key: string]: unknown
+  }>
+  [key: string]: unknown
+}
+
+/** 获取股票历史记忆 - GET /api/memory/stock/{stock_code} */
+export async function getStockMemory(stockCode: string): Promise<{ success: boolean; data: StockMemory }> {
+  return request(`/api/memory/stock/${encodeURIComponent(stockCode)}`)
+}
+
+// ==================== MCP 工具 API ====================
+
+/** MCP 工具参数定义 */
+export interface MCPToolParameter {
+  name: string
+  type: string
+  description: string
+  required: boolean
+  default?: unknown
+  [key: string]: unknown
+}
+
+/** MCP 工具信息 */
+export interface MCPToolInfo {
+  name: string
+  description: string
+  parameters: MCPToolParameter[]
+  [key: string]: unknown
+}
+
+/** 获取 MCP 工具列表 - GET /api/mcp/tools */
+export async function getMCPTools(): Promise<{ success: boolean; tools: MCPToolInfo[] }> {
+  return request('/api/mcp/tools')
+}
+
+/** MCP 工具调用请求 */
+export interface MCPCallRequest {
+  tool_name: string
+  arguments: Record<string, unknown>
+}
+
+/** 调用 MCP 工具 - POST /api/mcp/call */
+export async function callMCPTool(data: MCPCallRequest): Promise<{ success: boolean; result: unknown }> {
+  return request('/api/mcp/call', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+// ==================== 博弈论配置 API ====================
+
+/** 辩论配置参数 */
+export interface DebateConfigParams {
+  rounds: number
+  enable_prisoners_dilemma: boolean
+  enable_voting: boolean
+  [key: string]: unknown
+}
+
+/** 配置辩论参数 - POST /api/debate/config */
+export async function configureDebate(config: DebateConfigParams): Promise<{ success: boolean; message: string }> {
+  return request('/api/debate/config', {
+    method: 'POST',
+    body: JSON.stringify(config),
+  })
+}
+
+/** 辩论历史记录 */
+export interface DebateHistory {
+  stock_code: string
+  rounds: Array<{
+    round: number
+    bull_argument: string
+    bear_argument: string
+    [key: string]: unknown
+  }>
+  vote_result: Record<string, unknown>
+  cooperation_score: number
+  nash_equilibrium: Record<string, unknown>
+  [key: string]: unknown
+}
+
+/** 获取辩论历史 - GET /api/debate/history/{stock_code} */
+export async function getDebateHistory(stockCode: string): Promise<{ success: boolean; data: DebateHistory }> {
+  return request(`/api/debate/history/${encodeURIComponent(stockCode)}`)
+}
