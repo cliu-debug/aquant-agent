@@ -24,7 +24,8 @@ from astock_agents.agents import (
 )
 from astock_agents.models import (
     StockData, AnalysisReport, TechnicalAnalysis, FundamentalAnalysis,
-    SentimentAnalysis, NewsAnalysis, DebateResult, TradeProposal, RiskAssessment
+    SentimentAnalysis, NewsAnalysis, DebateResult, TradeProposal,
+    RiskAssessment, Signal
 )
 
 
@@ -115,6 +116,15 @@ class AnalysisWorkflow:
                 logger.info(f"[工作流] MCP服务已启用，注册 {len(self.mcp_server.list_tools())} 个工具")
             except Exception as e:
                 logger.warning(f"[工作流] MCP服务初始化失败: {e}")
+
+        # 初始化混合决策引擎（三层架构：规则为主 + LLM补充 + 风控强制）
+        self.decision_engine = None
+        try:
+            from astock_agents.services.decision_engine import DecisionEngine
+            self.decision_engine = DecisionEngine(config=self.config.get("decision_engine", {}))
+            logger.info("[工作流] 混合决策引擎已启用（规则为主 + LLM补充 + 风控强制）")
+        except Exception as e:
+            logger.warning(f"[工作流] 决策引擎初始化失败: {e}")
 
         # 初始化各智能体
         self.technical_analyst = TechnicalAnalyst(config=config)
@@ -738,10 +748,84 @@ class AnalysisWorkflow:
         return state
 
     def _generate_report_node(self, state: WorkflowState) -> WorkflowState:
-        """生成报告节点 - 同时自动记录分析行为到记忆系统"""
+        """生成报告节点 - 通过混合决策引擎做最终决策，同时自动记录分析行为到记忆系统"""
         logger.info("[工作流] 生成分析报告")
 
         try:
+            # 通过混合决策引擎做最终决策
+            final_signal = None
+            final_confidence = self._calculate_final_confidence(state)
+            decision_info = None
+
+            if self.decision_engine and state.get("trade_proposal"):
+                try:
+                    # 收集各维度信号
+                    dimension_signals = {}
+                    for dim in ["technical", "fundamental", "sentiment", "news"]:
+                        analysis = state.get(dim)
+                        if analysis and hasattr(analysis, "signal"):
+                            dimension_signals[dim] = analysis.signal
+
+                    # 获取规则引擎的初始信号
+                    rule_signal = Signal.HOLD
+                    if state.get("trade_proposal") and hasattr(state["trade_proposal"], "direction"):
+                        rule_signal = state["trade_proposal"].direction
+
+                    # 获取辩论结果
+                    debate = state.get("debate_result")
+                    debate_winning_side = debate.winning_side if debate else "neutral"
+                    debate_cooperation = debate.cooperation_score if debate else 0.5
+
+                    # 获取LLM决策逻辑
+                    llm_rationale = None
+                    if state.get("trade_proposal") and hasattr(state["trade_proposal"], "rationale"):
+                        llm_rationale = state["trade_proposal"].rationale
+
+                    # 获取ATR波动率
+                    atr_pct = 0
+                    if state.get("technical") and hasattr(state["technical"], "indicators"):
+                        atr_pct = state["technical"].indicators.get("atr", {}).get("pct", 0)
+
+                    # 执行混合决策
+                    decision_result = self.decision_engine.decide(
+                        rule_signal=rule_signal,
+                        rule_confidence=final_confidence,
+                        debate_winning_side=debate_winning_side,
+                        debate_cooperation=debate_cooperation,
+                        dimension_signals=dimension_signals,
+                        trade_proposal=state["trade_proposal"],
+                        llm_available=self.technical_analyst.llm is not None,
+                        llm_rationale=llm_rationale,
+                        context={
+                            "stock_code": state["stock_code"],
+                            "stock_name": state["stock_name"],
+                            "atr_pct": atr_pct,
+                        },
+                    )
+
+                    final_signal = decision_result["final_signal"]
+                    final_confidence = decision_result["final_confidence"]
+                    decision_info = decision_result["decision_log"]
+
+                    # 如果风控层调整了交易提案，更新state
+                    if decision_result.get("adjusted_proposal"):
+                        state["trade_proposal"] = decision_result["adjusted_proposal"]
+
+                    logger.info(
+                        f"[决策引擎] 最终决策: {final_signal.value}, "
+                        f"置信度={final_confidence}%, "
+                        f"来源={decision_result['decision_source']}"
+                    )
+
+                except Exception as e:
+                    logger.warning(f"[决策引擎] 决策失败，使用规则引擎结果: {e}")
+                    if state.get("trade_proposal"):
+                        final_signal = state["trade_proposal"].direction
+            else:
+                # 降级：无决策引擎时使用规则引擎结果
+                if state.get("trade_proposal"):
+                    final_signal = state["trade_proposal"].direction
+
             report = AnalysisReport(
                 stock_code=state["stock_code"],
                 stock_name=state["stock_name"],
@@ -756,12 +840,10 @@ class AnalysisWorkflow:
                 debate=state.get("debate_result"),
                 trade_proposal=state.get("trade_proposal"),
                 risk_assessment=state.get("risk_assessment_result"),
-                final_signal=(
-                    state["trade_proposal"].direction
-                    if state.get("trade_proposal") else None
-                ),
-                final_confidence=self._calculate_final_confidence(state),
+                final_signal=final_signal,
+                final_confidence=final_confidence,
                 full_report=self._generate_full_report_text(state),
+                metadata={"decision_info": decision_info} if decision_info else {},
                 errors=state.get("errors", [])
             )
 

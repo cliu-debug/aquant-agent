@@ -380,23 +380,14 @@ async def analyze_stock(request: Request, body: AnalysisRequest):
         except Exception as e:
             logger.warning(f"[Web] 分析结果持久化失败: {e}")
 
-        # 自动生成决策 - 分析完成后自动调用决策引擎
-        decision_id = None
-        try:
-            engine = _get_decision_engine()
-            decision = engine.generate_decision(
-                analysis_report=report.model_dump(),
-                portfolio_state=None,  # TODO: 从交易服务获取
-            )
-            decision_id = decision.id
-            logger.info(f"[Web] 自动决策已生成: {decision_id}")
-        except Exception as e:
-            logger.warning(f"[Web] 自动决策生成失败: {e}")
-
-        # 将决策ID附加到响应
+        # 决策引擎已集成到工作流内部（三层架构：规则为主+LLM补充+风控强制）
+        # 从报告的metadata中提取决策信息
         response_dict = response.model_dump()
-        if decision_id:
-            response_dict["decision_id"] = decision_id
+        if response_dict.get("metadata", {}).get("decision_info"):
+            logger.info(
+                f"[Web] 混合决策完成: "
+                f"来源={response_dict['metadata']['decision_info'].get('decision_source', 'unknown')}"
+            )
 
         return response_dict
 
