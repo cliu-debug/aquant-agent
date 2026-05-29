@@ -176,11 +176,22 @@ class RiskGuard:
         self.config = config or {}
         self.rules: List[RiskGuardRule] = []
         self._audit_log: List[Dict[str, Any]] = []
+        self._db = None
 
         # 注册默认风控规则
         self._register_default_rules()
 
         logger.info(f"[风控层] 初始化完成，注册{len(self.rules)}条规则")
+
+    def _get_db(self):
+        """懒加载数据库实例"""
+        if self._db is None:
+            try:
+                from astock_agents.db.database import Database
+                self._db = Database()
+            except Exception as e:
+                logger.warning(f"[风控层] 数据库初始化失败，审计日志仅存内存: {e}")
+        return self._db
 
     def _register_default_rules(self) -> None:
         """注册默认风控规则"""
@@ -285,6 +296,19 @@ class RiskGuard:
         }
         self._audit_log.append(audit_entry)
 
+        # 持久化审计日志到数据库
+        try:
+            db = self._get_db()
+            if db:
+                db.save_audit_log(
+                    log_type="risk_guard",
+                    action="enforce",
+                    stock_code=context.get("stock_code", ""),
+                    details=audit_entry,
+                )
+        except Exception as e:
+            logger.warning(f"[风控层] 审计日志持久化失败: {e}")
+
         result = {
             "approved": approved,
             "adjusted_proposal": adjusted_proposal,
@@ -306,10 +330,20 @@ class RiskGuard:
     def get_audit_log(self, limit: int = 100) -> List[Dict[str, Any]]:
         """获取审计日志
 
+        优先从数据库读取（持久化），数据库不可用时降级到内存。
+
         Args:
             limit: 返回条数上限
 
         Returns:
             审计日志列表
         """
+        try:
+            db = self._get_db()
+            if db:
+                db_logs = db.get_audit_logs(log_type="risk_guard", limit=limit)
+                if db_logs:
+                    return db_logs
+        except Exception:
+            pass
         return self._audit_log[-limit:]

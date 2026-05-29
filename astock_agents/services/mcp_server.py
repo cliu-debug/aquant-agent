@@ -248,7 +248,8 @@ class MCPServer:
             股票实时行情数据
         """
         stock_code = args.get("stock_code", "")
-        stock_data = self.data_manager.get_stock_data(stock_code)
+        _result = self.data_manager.get_stock_data(stock_code)
+        stock_data = _result[0] if isinstance(_result, tuple) else _result
 
         if not stock_data:
             return {"error": f"未找到股票数据: {stock_code}"}
@@ -273,7 +274,8 @@ class MCPServer:
         stock_code = args.get("stock_code", "")
         days = args.get("days", 120)
 
-        stock_data = self.data_manager.get_stock_data(stock_code, days=days)
+        _result = self.data_manager.get_stock_data(stock_code, days=days)
+        stock_data = _result[0] if isinstance(_result, tuple) else _result
 
         if not stock_data or not stock_data.prices:
             return {"error": f"未找到K线数据: {stock_code}"}
@@ -309,7 +311,8 @@ class MCPServer:
         stock_code = args.get("stock_code", "")
         report_type = args.get("report_type", "summary")
 
-        stock_data = self.data_manager.get_stock_data(stock_code)
+        _result = self.data_manager.get_stock_data(stock_code)
+        stock_data = _result[0] if isinstance(_result, tuple) else _result
 
         if not stock_data:
             return {"error": f"未找到股票数据: {stock_code}"}
@@ -388,7 +391,8 @@ class MCPServer:
         indicator = args.get("indicator", "").upper()
         params = args.get("params", {})
 
-        stock_data = self.data_manager.get_stock_data(stock_code)
+        _result = self.data_manager.get_stock_data(stock_code)
+        stock_data = _result[0] if isinstance(_result, tuple) else _result
 
         if not stock_data or not stock_data.prices:
             return {"error": f"未找到股票数据: {stock_code}"}

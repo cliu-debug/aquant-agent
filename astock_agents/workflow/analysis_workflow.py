@@ -207,13 +207,24 @@ class AnalysisWorkflow:
         logger.info(f"[工作流] 获取数据: {state['stock_code']}")
 
         try:
-            stock_data = self.data_manager.get_stock_data(
+            result = self.data_manager.get_stock_data(
                 stock_code=state["stock_code"],
                 stock_name=state["stock_name"],
                 days=250
             )
 
+            if isinstance(result, tuple):
+                stock_data, data_source_info = result
+            else:
+                stock_data = result
+                data_source_info = {
+                    "sources_used": {},
+                    "sources_unavailable": [],
+                    "quality_warnings": [],
+                }
+
             state["stock_data"] = stock_data
+            state["data_source_info"] = data_source_info
             if stock_data:
                 state["stock_name"] = stock_data.stock_name
 
@@ -826,6 +837,12 @@ class AnalysisWorkflow:
                 if state.get("trade_proposal"):
                     final_signal = state["trade_proposal"].direction
 
+            # 构建数据源标注
+            data_source_info = state.get("data_source_info", {})
+            from astock_agents.services.compliance import ComplianceGuard, SIGNAL_RISK_NOTICES
+            _signal_value = final_signal.value if final_signal and hasattr(final_signal, "value") else None
+            _risk_notice = SIGNAL_RISK_NOTICES.get(_signal_value) if _signal_value else None
+
             report = AnalysisReport(
                 stock_code=state["stock_code"],
                 stock_name=state["stock_name"],
@@ -844,6 +861,10 @@ class AnalysisWorkflow:
                 final_confidence=final_confidence,
                 full_report=self._generate_full_report_text(state),
                 metadata={"decision_info": decision_info} if decision_info else {},
+                data_sources_used=data_source_info.get("sources_used", {}),
+                data_sources_unavailable=data_source_info.get("sources_unavailable", []),
+                data_quality_warnings=data_source_info.get("quality_warnings", []),
+                risk_notice=_risk_notice,
                 errors=state.get("errors", [])
             )
 

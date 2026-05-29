@@ -254,6 +254,30 @@ class AnalysisReport(BaseModel):
     # 元数据
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
+    # 数据源标注
+    data_sources_used: Dict[str, str] = Field(
+        default_factory=dict,
+        description="各数据类型实际使用的数据源，如 {'kline': 'mootdx', 'quote': 'tencent'}"
+    )
+    data_sources_unavailable: List[str] = Field(
+        default_factory=list,
+        description="不可用的数据源列表"
+    )
+    data_quality_warnings: List[str] = Field(
+        default_factory=list,
+        description="数据质量警告，如 'K线数据仅60天（建议120天以上）'"
+    )
+
+    # 合规信息
+    disclaimer: str = Field(
+        default="本系统提供的分析结果仅供参考，不构成任何投资建议。股市有风险，投资需谨慎。",
+        description="免责声明"
+    )
+    risk_notice: Optional[str] = Field(
+        default=None,
+        description="针对当前信号的风险提示"
+    )
+
     # 错误收集
     errors: List[str] = Field(default_factory=list, description="分析过程中的错误/警告")
     

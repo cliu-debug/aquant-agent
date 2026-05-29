@@ -121,8 +121,19 @@ class DecisionEngine:
         self.risk_guard = RiskGuard(config=self.config.get("risk_guard", {}))
         self.uncertainty_detector = UncertaintyDetector()
         self._decision_log: List[Dict[str, Any]] = []
+        self._db = None
 
         logger.info("[决策引擎] 混合架构初始化完成 (规则为主 + LLM补充 + 风控强制)")
+
+    def _get_db(self):
+        """懒加载数据库实例"""
+        if self._db is None:
+            try:
+                from astock_agents.db.database import Database
+                self._db = Database()
+            except Exception as e:
+                logger.warning(f"[决策引擎] 数据库初始化失败，决策日志仅存内存: {e}")
+        return self._db
 
     def decide(
         self,
@@ -248,6 +259,19 @@ class DecisionEngine:
         }
         self._decision_log.append(decision_log)
 
+        # 持久化决策日志到数据库
+        try:
+            db = self._get_db()
+            if db:
+                db.save_audit_log(
+                    log_type="decision_engine",
+                    action="decide",
+                    stock_code=context.get("stock_code", ""),
+                    details=decision_log,
+                )
+        except Exception as e:
+            logger.warning(f"[决策引擎] 决策日志持久化失败: {e}")
+
         logger.info(
             f"[决策引擎] 决策完成: 最终信号={final_signal.value}, "
             f"置信度={final_confidence}%, 来源={decision_source}"
@@ -267,10 +291,20 @@ class DecisionEngine:
     def get_decision_log(self, limit: int = 100) -> List[Dict[str, Any]]:
         """获取决策日志
 
+        优先从数据库读取（持久化），数据库不可用时降级到内存。
+
         Args:
             limit: 返回条数上限
 
         Returns:
             决策日志列表
         """
+        try:
+            db = self._get_db()
+            if db:
+                db_logs = db.get_audit_logs(log_type="decision_engine", limit=limit)
+                if db_logs:
+                    return db_logs
+        except Exception:
+            pass
         return self._decision_log[-limit:]

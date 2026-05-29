@@ -74,10 +74,9 @@ class DataManager:
         self,
         stock_code: str,
         stock_name: Optional[str] = None,
-        days: int = 250
-    ) -> StockData:
-        """
-        获取股票完整数据
+        days: int = 120,
+    ) -> tuple:
+        """获取股票完整数据
 
         按优先级从多个数据源获取数据，自动降级和合并
 
@@ -87,29 +86,58 @@ class DataManager:
             days: K线天数
 
         Returns:
-            StockData 完整股票数据
+            (StockData, data_source_info) 元组
+            - StockData: 完整股票数据
+            - data_source_info: 数据源标注信息字典
         """
         logger.info(f"[DataManager] 获取股票数据: {stock_code}")
 
+        data_source_info = {
+            "sources_used": {},
+            "sources_unavailable": [],
+            "quality_warnings": [],
+        }
+
         # 1. 获取K线数据
-        prices = self._fetch_with_fallback(
+        prices, kline_source = self._fetch_with_fallback_tracked(
             "kline", stock_code, days=days
         )
+        if kline_source:
+            data_source_info["sources_used"]["kline"] = kline_source
+        else:
+            data_source_info["sources_unavailable"].append("kline")
+            data_source_info["quality_warnings"].append("K线数据不可用，技术分析可能受限")
 
         # 2. 获取实时行情（补充估值数据）
-        quote = self._fetch_with_fallback(
+        quote, quote_source = self._fetch_with_fallback_tracked(
             "quote", stock_code
         )
+        if quote_source:
+            data_source_info["sources_used"]["quote"] = quote_source
+        else:
+            data_source_info["sources_unavailable"].append("quote")
+            data_source_info["quality_warnings"].append("实时行情数据不可用，估值分析可能受限")
 
         # 3. 获取财务数据
-        financial_reports = self._fetch_with_fallback(
+        financial_reports, financial_source = self._fetch_with_fallback_tracked(
             "financial", stock_code
         )
+        if financial_source:
+            data_source_info["sources_used"]["financial"] = financial_source
+        else:
+            data_source_info["sources_unavailable"].append("financial")
+            data_source_info["quality_warnings"].append("财务数据不可用，基本面分析可能受限")
 
         # 4. 获取股票基本信息
         stock_info = self._fetch_stock_info(stock_code)
 
-        # 5. 组装 StockData
+        # 5. 数据质量检查
+        if prices and len(prices) < 60:
+            data_source_info["quality_warnings"].append(
+                f"K线数据仅{len(prices)}天（建议120天以上），技术指标可靠性降低"
+            )
+
+        # 6. 组装 StockData
         stock_data = StockData(
             stock_code=stock_code,
             stock_name=stock_name or self._extract_stock_name(quote, stock_info, stock_code),
@@ -124,10 +152,107 @@ class DataManager:
 
         logger.info(
             f"[DataManager] 数据获取完成: {stock_data.stock_name} "
-            f"(K线{len(stock_data.prices)}条, 财报{len(stock_data.financial_reports)}条)"
+            f"(K线{len(stock_data.prices)}条, 财报{len(stock_data.financial_reports)}条, "
+            f"数据源={data_source_info['sources_used']})"
         )
 
-        return stock_data
+        # 持久化数据源状态到数据库
+        self._persist_data_source_status(data_source_info)
+
+        return stock_data, data_source_info
+
+    def _fetch_with_fallback_tracked(
+        self,
+        data_type: str,
+        stock_code: str,
+        **kwargs,
+    ) -> tuple:
+        """按优先级尝试各数据源，返回数据和实际使用的数据源名称
+
+        Args:
+            data_type: 数据类型 kline/quote/financial
+            stock_code: 股票代码
+            **kwargs: 额外参数
+
+        Returns:
+            (data, source_name) 元组，data为获取到的数据，source_name为数据源名称
+        """
+        priority_map = {
+            "kline": self.KLINE_PRIORITY,
+            "quote": self.QUOTE_PRIORITY,
+            "financial": self.FINANCIAL_PRIORITY,
+        }
+        priority = priority_map.get(data_type, list(self._clients.keys()))
+
+        cache_map = {
+            "kline": self._kline_cache,
+            "quote": self._quote_cache,
+            "financial": self._financial_cache,
+        }
+        cache = cache_map.get(data_type)
+        cache_key = f"{data_type}:{stock_code}"
+
+        if cache is not None and cache_key in cache:
+            logger.debug(f"[DataManager] 缓存命中: {cache_key}")
+            cached_source = getattr(self, '_cache_source_map', {}).get(cache_key, "cache")
+            return cache[cache_key], cached_source
+
+        for source_name in priority:
+            client = self._clients.get(source_name)
+            if client is None or not client.enabled:
+                continue
+
+            try:
+                if data_type == "kline":
+                    result = client.fetch_kline(stock_code, **kwargs)
+                elif data_type == "quote":
+                    result = client.fetch_realtime_quote(stock_code)
+                elif data_type == "financial":
+                    result = client.fetch_financial_reports(stock_code)
+                else:
+                    continue
+
+                if result is not None:
+                    if cache is not None:
+                        cache[cache_key] = result
+                    if not hasattr(self, '_cache_source_map'):
+                        self._cache_source_map: Dict[str, str] = {}
+                    self._cache_source_map[cache_key] = source_name
+                    logger.debug(f"[DataManager] 数据源 {source_name} 获取 {data_type} 成功")
+                    return result, source_name
+
+            except Exception as e:
+                logger.warning(f"[DataManager] 数据源 {source_name} 获取 {data_type} 失败: {e}")
+                continue
+
+        logger.warning(f"[DataManager] 所有数据源均无法获取 {data_type}: {stock_code}")
+        return None, None
+
+    def _persist_data_source_status(self, data_source_info: Dict[str, Any]) -> None:
+        """将数据源状态持久化到数据库
+
+        Args:
+            data_source_info: 数据源标注信息
+        """
+        try:
+            from astock_agents.db.database import Database
+            db = Database()
+            for data_type, source_name in data_source_info.get("sources_used", {}).items():
+                db.save_data_source_status(
+                    source_name=source_name,
+                    data_type=data_type,
+                    status="available",
+                    message="数据获取成功",
+                )
+            for data_type in data_source_info.get("sources_unavailable", []):
+                db.save_data_source_status(
+                    source_name="all",
+                    data_type=data_type,
+                    status="unavailable",
+                    message="所有数据源均不可用",
+                )
+        except Exception as e:
+            logger.debug(f"[DataManager] 数据源状态持久化失败（非致命）: {e}")
 
     def _fetch_with_fallback(
         self,

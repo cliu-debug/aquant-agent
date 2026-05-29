@@ -131,6 +131,22 @@ class AnalysisResponse(BaseModel):
     price_data: Optional[List[Dict[str, Any]]] = None
     full_report: Optional[str] = None
     timestamp: str
+    data_sources_used: Optional[Dict[str, str]] = Field(
+        default=None, description="各数据类型实际使用的数据源"
+    )
+    data_sources_unavailable: Optional[List[str]] = Field(
+        default=None, description="不可用的数据源列表"
+    )
+    data_quality_warnings: Optional[List[str]] = Field(
+        default=None, description="数据质量警告"
+    )
+    disclaimer: str = Field(
+        default="本系统提供的分析结果仅供参考，不构成任何投资建议。股市有风险，投资需谨慎。",
+        description="免责声明"
+    )
+    risk_notice: Optional[str] = Field(
+        default=None, description="针对当前信号的风险提示"
+    )
 
 
 class BacktestSignal(BaseModel):
@@ -322,7 +338,8 @@ async def analyze_stock(request: Request, body: AnalysisRequest):
         elif report.current_price:
             try:
                 dm = _get_data_manager()
-                stock_info = dm.get_stock_data(validated_code)
+                stock_info_result = dm.get_stock_data(validated_code)
+                stock_info = stock_info_result[0] if isinstance(stock_info_result, tuple) else stock_info_result
                 if stock_info and stock_info.prices:
                     price_data = [
                         {
@@ -337,6 +354,27 @@ async def analyze_stock(request: Request, body: AnalysisRequest):
                     ]
             except Exception as e:
                 logger.warning(f"[Web] 获取K线数据失败: {e}")
+
+        # 构建合规信息
+        from astock_agents.services.compliance import ComplianceGuard, SIGNAL_RISK_NOTICES
+        _compliance = ComplianceGuard()
+        _signal_value = report.final_signal.value if report.final_signal else None
+        _risk_notice = SIGNAL_RISK_NOTICES.get(_signal_value, "ℹ️ 提示：本信号为系统分析结果，不构成投资建议。") if _signal_value else None
+
+        # 构建数据源标注
+        _data_sources_used = report.data_sources_used if hasattr(report, 'data_sources_used') else {}
+        _data_sources_unavailable = report.data_sources_unavailable if hasattr(report, 'data_sources_unavailable') else []
+        _data_quality_warnings = report.data_quality_warnings if hasattr(report, 'data_quality_warnings') else []
+
+        # 补充数据源信息（从断路器状态推断不可用数据源）
+        try:
+            from astock_agents.data.circuit_breaker import get_all_circuit_breaker_stats
+            cb_stats = get_all_circuit_breaker_stats()
+            for name, stats in cb_stats.items():
+                if stats.get("state") == "OPEN" and name not in _data_sources_unavailable:
+                    _data_sources_unavailable.append(name)
+        except Exception:
+            pass
 
         response = AnalysisResponse(
             stock_code=report.stock_code,
@@ -354,6 +392,10 @@ async def analyze_stock(request: Request, body: AnalysisRequest):
             price_data=price_data,
             full_report=report.full_report,
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            data_sources_used=_data_sources_used or None,
+            data_sources_unavailable=_data_sources_unavailable or None,
+            data_quality_warnings=_data_quality_warnings or None,
+            risk_notice=_risk_notice,
         )
 
         # 记录分析指标
@@ -774,7 +816,8 @@ async def run_backtest(request: Request, body: BacktestRequest):
     # 获取股票历史数据
     try:
         dm = _get_data_manager()
-        stock_data = dm.get_stock_data(validated_code)
+        stock_data_result = dm.get_stock_data(validated_code)
+        stock_data = stock_data_result[0] if isinstance(stock_data_result, tuple) else stock_data_result
     except Exception as e:
         logger.error(f"[Web] 回测获取数据失败: {validated_code}, {e}")
         raise HTTPException(status_code=503, detail=f"获取股票数据失败: {str(e)}")
@@ -1516,7 +1559,8 @@ async def capital_flow_analyze(request: Request, body: CapitalFlowRequest):
     try:
         # 获取股票数据
         dm = _get_data_manager()
-        stock_data = dm.get_stock_data(validated_code)
+        stock_data_result = dm.get_stock_data(validated_code)
+        stock_data = stock_data_result[0] if isinstance(stock_data_result, tuple) else stock_data_result
         if not stock_data:
             # 无数据时创建基础StockData
             from astock_agents.models import StockData as SD
@@ -1908,6 +1952,183 @@ async def get_debate_history(request: Request, stock_code: str, limit: int = 20)
     except Exception as e:
         logger.error(f"[Web] 获取辩论历史失败: {stock_code}, {e}")
         raise HTTPException(status_code=500, detail=f"获取辩论历史失败: {str(e)}")
+
+
+# ==================== 合规/审计/FOMO/风险确认 API ====================
+
+@app.get("/api/compliance/check")
+@limiter.limit("30/minute")
+async def compliance_check(request: Request, content: str = ""):
+    """合规内容审查
+
+    检查指定内容是否包含违规用语，返回审查结果。
+    """
+    from astock_agents.services.compliance import ComplianceGuard
+    guard = ComplianceGuard()
+    result = guard.audit_content(content) if content else {"compliant": True, "violations": [], "sanitized_content": content}
+    return {"success": True, "data": result}
+
+
+@app.get("/api/compliance/log")
+@limiter.limit("30/minute")
+async def get_compliance_log(request: Request, limit: int = 50):
+    """获取合规审查日志"""
+    from astock_agents.services.compliance import ComplianceGuard
+    guard = ComplianceGuard()
+    logs = guard.get_compliance_log(limit=limit)
+    return {"success": True, "data": logs, "total": len(logs)}
+
+
+@app.get("/api/audit/logs")
+@limiter.limit("30/minute")
+async def get_audit_logs(
+    request: Request,
+    log_type: Optional[str] = None,
+    stock_code: Optional[str] = None,
+    limit: int = 100,
+):
+    """获取审计日志
+
+    支持按类型和股票代码过滤，返回风控/决策/合规等审计记录。
+    """
+    try:
+        db = _get_db()
+        logs = db.get_audit_logs(log_type=log_type, stock_code=stock_code, limit=limit)
+        return {"success": True, "data": logs, "total": len(logs)}
+    except Exception as e:
+        logger.error(f"[Web] 获取审计日志失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取审计日志失败: {str(e)}")
+
+
+@app.get("/api/datasource/status")
+@limiter.limit("30/minute")
+async def get_datasource_status(request: Request):
+    """获取数据源状态
+
+    返回各数据源的最新可用状态，包括数据类型、状态和消息。
+    """
+    try:
+        db = _get_db()
+        status = db.get_latest_data_source_status()
+        return {"success": True, "data": status}
+    except Exception as e:
+        logger.error(f"[Web] 获取数据源状态失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取数据源状态失败: {str(e)}")
+
+
+@app.post("/api/fomo/detect")
+@limiter.limit("30/minute")
+async def fomo_detect(request: Request, body: dict):
+    """FOMO行为检测
+
+    检测追高行为和过度交易倾向，返回检测结果和警告。
+    """
+    from astock_agents.services.fomo_guard import FOMODetector
+    detector = FOMODetector()
+
+    detect_type = body.get("type", "chasing_high")
+    result: Dict[str, Any] = {}
+
+    if detect_type == "chasing_high":
+        result = detector.detect_chasing_high(
+            stock_code=body.get("stock_code", ""),
+            current_price=float(body.get("current_price", 0)),
+            recent_high=float(body.get("recent_high", 0)),
+            position_pct=float(body.get("position_pct", 0)),
+        )
+    elif detect_type == "overtrading":
+        result = detector.detect_overtrading(user_id=body.get("user_id", "default"))
+
+    return {"success": True, "data": result}
+
+
+@app.post("/api/fomo/record-trade")
+@limiter.limit("30/minute")
+async def fomo_record_trade(request: Request, body: dict):
+    """记录交易行为（用于FOMO检测）"""
+    from astock_agents.services.fomo_guard import FOMODetector
+    detector = FOMODetector()
+    detector.record_trade(body)
+    return {"success": True, "message": "交易记录已保存"}
+
+
+@app.post("/api/emotion/calibrate")
+@limiter.limit("30/minute")
+async def emotion_calibrate(request: Request, body: dict):
+    """情绪隔离 - 信号校准
+
+    根据市场恐贪指数校准交易信号，防止情绪驱动决策。
+    """
+    from astock_agents.services.fomo_guard import EmotionIsolationLayer
+    layer = EmotionIsolationLayer()
+    result = layer.calibrate_signal(
+        signal=body.get("signal", "持有"),
+        confidence=int(body.get("confidence", 50)),
+        fear_greed_index=float(body.get("fear_greed_index", 50)),
+    )
+    return {"success": True, "data": result}
+
+
+@app.post("/api/stop-loss/calculate")
+@limiter.limit("30/minute")
+async def calculate_stop_loss(request: Request, body: dict):
+    """计算动态止损位
+
+    基于ATR计算动态止损价格，支持追踪止损。
+    """
+    from astock_agents.services.position_sizing import DynamicStopLossService
+    service = DynamicStopLossService()
+    result = service.calculate_stop_loss(
+        entry_price=float(body.get("entry_price", 0)),
+        prices=body.get("prices", []),
+        direction=body.get("direction", "buy"),
+        current_profit_pct=float(body.get("current_profit_pct", 0)),
+    )
+    return {"success": True, "data": result}
+
+
+@app.get("/api/risk/acknowledgment")
+@limiter.limit("30/minute")
+async def check_risk_acknowledgment(request: Request, user_id: str = "default"):
+    """检查用户是否已确认风险告知"""
+    try:
+        db = _get_db()
+        acknowledged = db.is_risk_acknowledged(user_id)
+        return {"success": True, "acknowledged": acknowledged, "user_id": user_id}
+    except Exception as e:
+        logger.error(f"[Web] 检查风险确认状态失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/risk/acknowledge")
+@limiter.limit("10/minute")
+async def acknowledge_risk(request: Request, body: dict):
+    """用户确认风险告知
+
+    用户首次使用系统时需确认风险告知，记录确认时间和版本。
+    """
+    try:
+        db = _get_db()
+        user_id = body.get("user_id", "default")
+        version = body.get("version", "1.0")
+        success = db.acknowledge_risk(user_id, version)
+        if success:
+            return {"success": True, "message": "风险确认已记录"}
+        else:
+            raise HTTPException(status_code=500, detail="风险确认记录失败")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[Web] 记录风险确认失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/risk/disclaimer")
+@limiter.limit("60/minute")
+async def get_disclaimer(request: Request):
+    """获取免责声明文本"""
+    from astock_agents.services.compliance import DISCLAIMER_TEXT
+    return {"success": True, "disclaimer": DISCLAIMER_TEXT}
 
 
 if os.path.isdir(_FRONTEND_DIST) and not os.environ.get("ASTOCK_DEV_MODE"):

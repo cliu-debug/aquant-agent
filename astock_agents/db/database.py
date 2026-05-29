@@ -184,6 +184,36 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS idx_feedback_user ON feedback_records(user_id);
                 CREATE INDEX IF NOT EXISTS idx_feedback_stock ON feedback_records(stock_code);
+
+                CREATE TABLE IF NOT EXISTS audit_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    log_type TEXT NOT NULL,
+                    stock_code TEXT DEFAULT '',
+                    action TEXT NOT NULL,
+                    details_json TEXT DEFAULT '{}',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_audit_type ON audit_logs(log_type);
+                CREATE INDEX IF NOT EXISTS idx_audit_stock ON audit_logs(stock_code);
+                CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_logs(created_at);
+
+                CREATE TABLE IF NOT EXISTS risk_acknowledgment (
+                    user_id TEXT PRIMARY KEY,
+                    acknowledged INTEGER DEFAULT 0,
+                    acknowledged_at TIMESTAMP,
+                    version TEXT DEFAULT '1.0'
+                );
+
+                CREATE TABLE IF NOT EXISTS data_source_status (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_name TEXT NOT NULL,
+                    data_type TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    message TEXT DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_datasource_name ON data_source_status(source_name);
+                CREATE INDEX IF NOT EXISTS idx_datasource_time ON data_source_status(created_at);
             """)
             conn.commit()
         finally:
@@ -235,6 +265,183 @@ class Database:
                 (stock_code, limit),
             ).fetchall()
             return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    # ---- 审计日志 ----
+
+    def save_audit_log(
+        self,
+        log_type: str,
+        action: str,
+        stock_code: str = "",
+        details: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """保存审计日志
+
+        Args:
+            log_type: 日志类型（risk_guard / decision_engine / compliance / fomo）
+            action: 操作描述
+            stock_code: 股票代码
+            details: 详细信息字典
+
+        Returns:
+            插入记录的ID
+        """
+        import json as _json
+        conn = self._get_conn()
+        try:
+            cursor = conn.execute(
+                """INSERT INTO audit_logs (log_type, stock_code, action, details_json)
+                VALUES (?,?,?,?)""",
+                (log_type, stock_code, action, _json.dumps(details or {}, ensure_ascii=False)),
+            )
+            conn.commit()
+            return cursor.lastrowid or 0
+        finally:
+            conn.close()
+
+    def get_audit_logs(
+        self,
+        log_type: Optional[str] = None,
+        stock_code: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """获取审计日志
+
+        Args:
+            log_type: 日志类型过滤（可选）
+            stock_code: 股票代码过滤（可选）
+            limit: 返回条数上限
+
+        Returns:
+            审计日志字典列表，按时间倒序
+        """
+        import json as _json
+        conn = self._get_conn()
+        try:
+            query = "SELECT * FROM audit_logs WHERE 1=1"
+            params: list = []
+            if log_type:
+                query += " AND log_type=?"
+                params.append(log_type)
+            if stock_code:
+                query += " AND stock_code=?"
+                params.append(stock_code)
+            query += " ORDER BY created_at DESC LIMIT ?"
+            params.append(limit)
+            rows = conn.execute(query, params).fetchall()
+            results = []
+            for r in rows:
+                d = dict(r)
+                try:
+                    d["details"] = _json.loads(d.get("details_json", "{}"))
+                except (ValueError, TypeError):
+                    d["details"] = {}
+                results.append(d)
+            return results
+        finally:
+            conn.close()
+
+    # ---- 风险确认 ----
+
+    def acknowledge_risk(self, user_id: str, version: str = "1.0") -> bool:
+        """记录用户风险确认
+
+        Args:
+            user_id: 用户ID
+            version: 确认书版本
+
+        Returns:
+            是否记录成功
+        """
+        conn = self._get_conn()
+        try:
+            conn.execute(
+                """INSERT OR REPLACE INTO risk_acknowledgment (user_id, acknowledged, acknowledged_at, version)
+                VALUES (?, 1, CURRENT_TIMESTAMP, ?)""",
+                (user_id, version),
+            )
+            conn.commit()
+            return True
+        except Exception:
+            return False
+        finally:
+            conn.close()
+
+    def is_risk_acknowledged(self, user_id: str) -> bool:
+        """检查用户是否已确认风险
+
+        Args:
+            user_id: 用户ID
+
+        Returns:
+            是否已确认
+        """
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                "SELECT acknowledged FROM risk_acknowledgment WHERE user_id=?",
+                (user_id,),
+            ).fetchone()
+            return dict(row).get("acknowledged", 0) == 1 if row else False
+        finally:
+            conn.close()
+
+    # ---- 数据源状态 ----
+
+    def save_data_source_status(
+        self,
+        source_name: str,
+        data_type: str,
+        status: str,
+        message: str = "",
+    ) -> int:
+        """保存数据源状态记录
+
+        Args:
+            source_name: 数据源名称
+            data_type: 数据类型（kline / quote / financial）
+            status: 状态（available / unavailable / degraded）
+            message: 状态消息
+
+        Returns:
+            插入记录的ID
+        """
+        conn = self._get_conn()
+        try:
+            cursor = conn.execute(
+                """INSERT INTO data_source_status (source_name, data_type, status, message)
+                VALUES (?,?,?,?)""",
+                (source_name, data_type, status, message),
+            )
+            conn.commit()
+            return cursor.lastrowid or 0
+        finally:
+            conn.close()
+
+    def get_latest_data_source_status(self) -> Dict[str, Dict[str, Any]]:
+        """获取各数据源最新状态
+
+        Returns:
+            以数据源名称为键、最新状态信息为值的字典
+        """
+        conn = self._get_conn()
+        try:
+            rows = conn.execute(
+                """SELECT s1.* FROM data_source_status s1
+                INNER JOIN (
+                    SELECT source_name, data_type, MAX(id) as max_id
+                    FROM data_source_status
+                    GROUP BY source_name, data_type
+                ) s2 ON s1.id = s2.max_id"""
+            ).fetchall()
+            result: Dict[str, Dict[str, Any]] = {}
+            for r in rows:
+                d = dict(r)
+                key = f"{d['source_name']}_{d['data_type']}"
+                result[key] = d
+            return result
         finally:
             conn.close()
 

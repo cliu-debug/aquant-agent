@@ -496,3 +496,161 @@ class PositionSizingService:
         parts.append(f"最终建议仓位={recommended_pct:.1%}")
 
         return " | ".join(parts)
+
+
+class DynamicStopLossService:
+    """动态止损服务 - 基于ATR计算止损位
+
+    核心逻辑：
+    1. 使用ATR(Average True Range)衡量波动率
+    2. 买入止损 = 入场价 - N * ATR（N通常为2-3）
+    3. 卖出止损 = 入场价 + N * ATR
+    4. 随时间推移，止损位逐步上移（追踪止损）
+    5. 波动率增大时，止损位更宽松；波动率减小时，止损位更紧凑
+    """
+
+    DEFAULT_ATR_PERIOD: int = 14
+    DEFAULT_BUY_ATR_MULTIPLIER: float = 2.0
+    DEFAULT_SELL_ATR_MULTIPLIER: float = 2.0
+    DEFAULT_MIN_STOP_LOSS_PCT: float = 0.02
+    DEFAULT_MAX_STOP_LOSS_PCT: float = 0.15
+    DEFAULT_TRAILING_ACTIVATION_PCT: float = 0.03
+
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        self.config = config or {}
+        self.atr_period = self.config.get("atr_period", self.DEFAULT_ATR_PERIOD)
+        self.buy_atr_mult = self.config.get("buy_atr_multiplier", self.DEFAULT_BUY_ATR_MULTIPLIER)
+        self.sell_atr_mult = self.config.get("sell_atr_multiplier", self.DEFAULT_SELL_ATR_MULTIPLIER)
+        self.min_stop_pct = self.config.get("min_stop_loss_pct", self.DEFAULT_MIN_STOP_LOSS_PCT)
+        self.max_stop_pct = self.config.get("max_stop_loss_pct", self.DEFAULT_MAX_STOP_LOSS_PCT)
+        self.trailing_activation = self.config.get("trailing_activation_pct", self.DEFAULT_TRAILING_ACTIVATION_PCT)
+        logger.info(f"[动态止损] 初始化完成, ATR周期={self.atr_period}, 买入倍数={self.buy_atr_mult}")
+
+    @staticmethod
+    def calculate_atr(
+        prices: List[Dict[str, Any]],
+        period: int = 14,
+    ) -> Optional[float]:
+        """计算ATR(Average True Range)
+
+        Args:
+            prices: 价格数据列表，每个元素需包含 high/low/close 字段
+            period: ATR计算周期
+
+        Returns:
+            ATR值，数据不足时返回None
+        """
+        if not prices or len(prices) < period + 1:
+            return None
+
+        true_ranges: List[float] = []
+        for i in range(1, len(prices)):
+            curr = prices[i]
+            prev = prices[i - 1]
+
+            high = curr.get("high", 0)
+            low = curr.get("low", 0)
+            prev_close = prev.get("close", 0)
+
+            if high == 0 or low == 0:
+                continue
+
+            tr = max(
+                high - low,
+                abs(high - prev_close),
+                abs(low - prev_close),
+            )
+            true_ranges.append(tr)
+
+        if len(true_ranges) < period:
+            return None
+
+        return sum(true_ranges[-period:]) / period
+
+    def calculate_stop_loss(
+        self,
+        entry_price: float,
+        prices: List[Dict[str, Any]],
+        direction: str = "buy",
+        current_profit_pct: float = 0.0,
+    ) -> Dict[str, Any]:
+        """计算动态止损位
+
+        Args:
+            entry_price: 入场价格
+            prices: 历史价格数据
+            direction: 交易方向 buy/sell
+            current_profit_pct: 当前浮盈百分比
+
+        Returns:
+            止损计算结果字典
+        """
+        atr = self.calculate_atr(prices, self.atr_period)
+
+        if atr is None or entry_price <= 0:
+            fallback_pct = self.config.get("default_stop_loss_pct", 0.07)
+            stop_price = entry_price * (1 - fallback_pct) if direction == "buy" else entry_price * (1 + fallback_pct)
+            return {
+                "stop_price": round(stop_price, 2),
+                "stop_loss_pct": round(fallback_pct, 4),
+                "atr": None,
+                "atr_multiplier": 0.0,
+                "method": "fixed_fallback",
+                "reasoning": f"ATR数据不足，使用固定止损{fallback_pct:.1%}",
+            }
+
+        if direction == "buy":
+            atr_mult = self.buy_atr_mult
+            raw_stop = entry_price - atr_mult * atr
+            raw_stop_pct = (entry_price - raw_stop) / entry_price
+        else:
+            atr_mult = self.sell_atr_mult
+            raw_stop = entry_price + atr_mult * atr
+            raw_stop_pct = (raw_stop - entry_price) / entry_price
+
+        # 限制止损范围
+        clamped_pct = max(self.min_stop_pct, min(self.max_stop_pct, raw_stop_pct))
+
+        if direction == "buy":
+            stop_price = entry_price * (1 - clamped_pct)
+        else:
+            stop_price = entry_price * (1 + clamped_pct)
+
+        # 追踪止损：当浮盈超过阈值时，止损位上移
+        trailing_activated = current_profit_pct >= self.trailing_activation
+        if trailing_activated and direction == "buy":
+            trailing_stop = entry_price * (1 + current_profit_pct - clamped_pct * 0.5)
+            if trailing_stop > stop_price:
+                stop_price = trailing_stop
+                clamped_pct = (entry_price - stop_price) / entry_price
+                method = "trailing"
+            else:
+                method = "atr"
+        elif trailing_activated and direction == "sell":
+            trailing_stop = entry_price * (1 - current_profit_pct + clamped_pct * 0.5)
+            if trailing_stop < stop_price:
+                stop_price = trailing_stop
+                clamped_pct = (stop_price - entry_price) / entry_price
+                method = "trailing"
+            else:
+                method = "atr"
+        else:
+            method = "atr"
+
+        reasoning_parts = [
+            f"ATR={atr:.2f}, 倍数={atr_mult}",
+            f"原始止损={raw_stop_pct:.1%}",
+            f"约束后止损={clamped_pct:.1%}",
+        ]
+        if trailing_activated:
+            reasoning_parts.append(f"追踪止损已激活(浮盈{current_profit_pct:.1%}≥{self.trailing_activation:.1%})")
+
+        return {
+            "stop_price": round(stop_price, 2),
+            "stop_loss_pct": round(abs(clamped_pct), 4),
+            "atr": round(atr, 2),
+            "atr_multiplier": atr_mult,
+            "method": method,
+            "trailing_activated": trailing_activated,
+            "reasoning": " | ".join(reasoning_parts),
+        }
