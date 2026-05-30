@@ -264,6 +264,51 @@ export async function runBacktest(
   })
 }
 
+/** 策略信息 */
+export interface StrategyInfo {
+  id: string
+  name: string
+  description: string
+  params: StrategyParam[]
+}
+
+/** 策略参数定义 */
+export interface StrategyParam {
+  key: string
+  label: string
+  type: 'int' | 'float'
+  default: number
+  min: number
+  max: number
+}
+
+/** 策略回测请求 */
+export interface StrategyBacktestRequest {
+  stock_code: string
+  strategy_id: string
+  strategy_params?: Record<string, number>
+  position_size_pct?: number
+  stop_loss_pct?: number
+  take_profit_pct?: number
+}
+
+/** 获取可用策略列表 - GET /api/backtest/strategies */
+export async function getBacktestStrategies(): Promise<StrategyInfo[]> {
+  const res = await request<{ success: boolean; data: StrategyInfo[] }>('/api/backtest/strategies')
+  return res.data
+}
+
+/** 策略自动回测 - POST /api/backtest/strategy-run */
+export async function runStrategyBacktest(
+  data: StrategyBacktestRequest
+): Promise<Record<string, unknown>> {
+  const res = await request<{ success: boolean; data: Record<string, unknown> }>('/api/backtest/strategy-run', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+  return res.data
+}
+
 // ==================== 复盘 API ====================
 
 /** 获取复盘报告 - GET /api/review/report */

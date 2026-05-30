@@ -849,6 +849,107 @@ async def run_backtest(request: Request, body: BacktestRequest):
         raise HTTPException(status_code=500, detail=f"回测执行失败: {str(e)}")
 
 
+class StrategyBacktestRequest(BaseModel):
+    """策略自动回测请求"""
+    stock_code: str = Field(..., description="股票代码")
+    strategy_id: str = Field(..., description="策略ID: ma/macd/rsi/boll/kdj/combo")
+    strategy_params: Optional[Dict[str, Any]] = Field(default=None, description="策略参数")
+    position_size_pct: float = Field(default=0.2, description="每次交易仓位比例")
+    stop_loss_pct: float = Field(default=0.07, description="止损比例")
+    take_profit_pct: float = Field(default=0.15, description="止盈比例")
+
+
+@app.get("/api/backtest/strategies")
+@limiter.limit("30/minute")
+async def get_backtest_strategies(request: Request):
+    """获取所有可用的回测策略列表"""
+    from astock_agents.services.strategy_signals import get_available_strategies
+    strategies = get_available_strategies()
+    return {"success": True, "data": strategies}
+
+
+@app.post("/api/backtest/strategy-run")
+@limiter.limit("5/minute")
+async def run_strategy_backtest(request: Request, body: StrategyBacktestRequest):
+    """策略自动回测
+
+    根据策略ID自动生成交易信号并执行回测，无需手动输入信号。
+    支持策略: ma(均线)/macd/rsi/boll(布林带)/kdj/combo(组合投票)
+    """
+    try:
+        validated_code = validate_stock_code(body.stock_code)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # 获取股票数据
+    try:
+        dm = _get_data_manager()
+        stock_data_result = dm.get_stock_data(validated_code)
+        stock_data = stock_data_result[0] if isinstance(stock_data_result, tuple) else stock_data_result
+    except Exception as e:
+        logger.error(f"[Web] 策略回测获取数据失败: {validated_code}, {e}")
+        raise HTTPException(status_code=503, detail=f"获取股票数据失败: {str(e)}")
+
+    if not stock_data or not stock_data.prices:
+        raise HTTPException(status_code=404, detail=f"未找到 {validated_code} 的历史数据")
+
+    # 将StockPrice转为字典列表供策略使用
+    prices = []
+    for p in stock_data.prices:
+        prices.append({
+            "date": p.date.strftime("%Y-%m-%d") if hasattr(p.date, "strftime") else str(p.date),
+            "open": p.open,
+            "high": p.high,
+            "low": p.low,
+            "close": p.close,
+            "volume": p.volume,
+        })
+
+    # 生成策略信号
+    try:
+        from astock_agents.services.strategy_signals import generate_strategy_signals
+        signals = generate_strategy_signals(
+            strategy_id=body.strategy_id,
+            prices=prices,
+            params=body.strategy_params,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"[Web] 策略信号生成失败: {body.strategy_id}, {e}")
+        raise HTTPException(status_code=500, detail=f"策略信号生成失败: {str(e)}")
+
+    if not signals:
+        raise HTTPException(status_code=404, detail=f"策略 {body.strategy_id} 未生成任何交易信号")
+
+    # 执行回测
+    try:
+        engine = _get_backtest_engine()
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: engine.run(
+                stock_data=stock_data,
+                signals=signals,
+                strategy_name=body.strategy_id,
+                position_size_pct=body.position_size_pct,
+                stop_loss_pct=body.stop_loss_pct,
+                take_profit_pct=body.take_profit_pct,
+            )
+        )
+
+        result_dict = asdict(result)
+        result_dict["strategy_id"] = body.strategy_id
+        result_dict["signal_count"] = len(signals)
+        result_dict["buy_signals"] = sum(1 for s in signals if s["action"] == "buy")
+        result_dict["sell_signals"] = sum(1 for s in signals if s["action"] == "sell")
+        return {"success": True, "data": result_dict}
+
+    except Exception as e:
+        logger.error(f"[Web] 策略回测执行失败: {validated_code}, {e}")
+        raise HTTPException(status_code=500, detail=f"策略回测执行失败: {str(e)}")
+
+
 # ---------- 宏观分析 ----------
 
 class MacroAnalysisRequest(BaseModel):
