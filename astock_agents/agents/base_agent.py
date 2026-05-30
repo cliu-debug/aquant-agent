@@ -635,27 +635,34 @@ class BaseAgent(ABC):
             raise RuntimeError(f"[{self.name}] LLM未配置，无法执行分析")
 
         max_context_tokens = int(self.config.get("llm_max_context_tokens", 2048))
-        reserved_output_tokens = int(self.config.get("llm_reserved_output_tokens", 1200))
-        chars_per_token = float(self.config.get("llm_chars_per_token", 2.5))
+        reserved_output_tokens = int(self.config.get("llm_reserved_output_tokens", 800))
+        chars_per_token = float(self.config.get("llm_chars_per_token", 2.0))
 
         max_input_tokens = max_context_tokens - reserved_output_tokens
         max_total_chars = int(max_input_tokens / chars_per_token)
 
+        system_min_chars = 30
+        prompt_min_chars = 100
+        buffer_chars = 100
+
         system_chars = len(system_prompt) if system_prompt else 0
-        max_prompt_chars = max_total_chars - system_chars - 200
+        available_chars = max_total_chars - buffer_chars
 
-        if max_prompt_chars < 200:
-            max_prompt_chars = 200
-            if system_prompt and len(system_prompt) > max_total_chars - 400:
-                system_prompt = system_prompt[:max_total_chars - 400]
-                logger.debug(f"[{self.name}] System prompt截断至{len(system_prompt)}字符")
+        if system_chars + len(prompt) <= available_chars:
+            pass
+        else:
+            max_system_chars = min(system_chars, max(available_chars // 4, system_min_chars))
+            if system_prompt and system_chars > max_system_chars:
+                system_prompt = system_prompt[:max_system_chars]
+                logger.debug(f"[{self.name}] System prompt截断: {system_chars}→{max_system_chars}字符")
 
-        original_len = len(prompt)
-        if original_len > max_prompt_chars:
-            truncated = prompt[:max_prompt_chars]
-            truncation_notice = f"\n[数据已截断]"
-            prompt = truncated + truncation_notice
-            logger.info(f"[{self.name}] Prompt截断: {original_len}→{len(prompt)}字符 (上下文{max_context_tokens}tokens)")
+            max_prompt_chars = available_chars - len(system_prompt) if system_prompt else available_chars
+            max_prompt_chars = max(max_prompt_chars, prompt_min_chars)
+
+            if len(prompt) > max_prompt_chars:
+                original_len = len(prompt)
+                prompt = prompt[:max_prompt_chars] + "\n[截断]"
+                logger.info(f"[{self.name}] Prompt截断: {original_len}→{len(prompt)}字符 (上下文{max_context_tokens}tokens)")
 
         max_retries = int(self.config.get("llm_max_retries", 3))
         retry_delay = float(self.config.get("llm_retry_delay", 5.0))
