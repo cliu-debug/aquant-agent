@@ -72,6 +72,12 @@ def get_llm_config() -> Dict[str, Any]:
             "base_url": "https://openrouter.ai/api/v1",
             "temperature": float(os.getenv("OPENROUTER_TEMPERATURE", "0.3")),
         },
+        "local": {
+            "api_key": os.getenv("LOCAL_LLM_API_KEY", "not-needed"),
+            "model": os.getenv("LOCAL_LLM_MODEL", "google_gemma-4-E4B-it-Q4_K_M.gguf"),
+            "base_url": os.getenv("LOCAL_LLM_BASE_URL", "http://127.0.0.1:8080/v1"),
+            "temperature": float(os.getenv("LOCAL_LLM_TEMPERATURE", "0.3")),
+        },
     }
 
 

@@ -518,6 +518,20 @@ class BaseAgent(ABC):
                         "X-Title": "AStockAgents",
                     },
                 )
+            elif provider == "local":
+                from langchain_openai import ChatOpenAI
+                base_url = llm_config.get("local", {}).get("base_url", "http://127.0.0.1:8080/v1")
+                model = llm_config.get("local", {}).get("model", "google_gemma-4-E4B-it-Q4_K_M.gguf")
+                api_key = llm_config.get("local", {}).get("api_key", "not-needed")
+                local_max_tokens = int(llm_config.get("local", {}).get("max_tokens", 1024))
+                logger.info(f"[{self.name}] 使用本地模型: {model} @ {base_url} (max_tokens={local_max_tokens})")
+                return ChatOpenAI(
+                    model=model,
+                    temperature=llm_config.get("local", {}).get("temperature", 0.3),
+                    api_key=api_key,
+                    base_url=base_url,
+                    max_tokens=local_max_tokens,
+                )
             else:
                 logger.warning(f"[{self.name}] 不支持的LLM提供商: {provider}，尝试降级到Ollama")
                 return self._try_ollama_fallback()
@@ -600,8 +614,12 @@ class BaseAgent(ABC):
         return base_prompt
 
     def _call_llm(self, prompt: str, system_prompt: Optional[str] = None) -> str:
-        """
-        调用LLM
+        """调用LLM
+
+        自动截断过长的prompt以适应小上下文模型。
+        本地小模型(如gemma4)上下文窗口有限，需要控制输入长度。
+        支持自动检测上下文窗口大小并动态调整截断阈值。
+        内置重试机制，处理本地模型并发冲突。
 
         Args:
             prompt: 用户提示词
@@ -616,20 +634,63 @@ class BaseAgent(ABC):
         if not self.llm:
             raise RuntimeError(f"[{self.name}] LLM未配置，无法执行分析")
 
-        try:
-            messages = []
+        max_context_tokens = int(self.config.get("llm_max_context_tokens", 2048))
+        reserved_output_tokens = int(self.config.get("llm_reserved_output_tokens", 1200))
+        chars_per_token = float(self.config.get("llm_chars_per_token", 2.5))
 
-            if system_prompt:
-                messages.append(("system", system_prompt))
+        max_input_tokens = max_context_tokens - reserved_output_tokens
+        max_total_chars = int(max_input_tokens / chars_per_token)
 
-            messages.append(("human", prompt))
+        system_chars = len(system_prompt) if system_prompt else 0
+        max_prompt_chars = max_total_chars - system_chars - 200
 
-            response = self.llm.invoke(messages)
-            return response.content
+        if max_prompt_chars < 200:
+            max_prompt_chars = 200
+            if system_prompt and len(system_prompt) > max_total_chars - 400:
+                system_prompt = system_prompt[:max_total_chars - 400]
+                logger.debug(f"[{self.name}] System prompt截断至{len(system_prompt)}字符")
 
-        except Exception as e:
-            logger.error(f"[{self.name}] LLM调用失败: {e}")
-            raise RuntimeError(f"LLM调用失败: {e}") from e
+        original_len = len(prompt)
+        if original_len > max_prompt_chars:
+            truncated = prompt[:max_prompt_chars]
+            truncation_notice = f"\n[数据已截断]"
+            prompt = truncated + truncation_notice
+            logger.info(f"[{self.name}] Prompt截断: {original_len}→{len(prompt)}字符 (上下文{max_context_tokens}tokens)")
+
+        max_retries = int(self.config.get("llm_max_retries", 3))
+        retry_delay = float(self.config.get("llm_retry_delay", 5.0))
+
+        for attempt in range(max_retries):
+            try:
+                messages = []
+
+                if system_prompt:
+                    messages.append(("system", system_prompt))
+
+                messages.append(("human", prompt))
+
+                response = self.llm.invoke(messages)
+                return response.content
+
+            except Exception as e:
+                error_str = str(e)
+                is_retryable = any(
+                    keyword in error_str.lower()
+                    for keyword in ["context size", "slot", "busy", "timeout", "connection", "503", "429"]
+                )
+
+                if is_retryable and attempt < max_retries - 1:
+                    wait_time = retry_delay * (attempt + 1)
+                    logger.warning(
+                        f"[{self.name}] LLM调用失败(可重试, 第{attempt + 1}次): {e}, "
+                        f"{wait_time}秒后重试..."
+                    )
+                    import time
+                    time.sleep(wait_time)
+                    continue
+
+                logger.error(f"[{self.name}] LLM调用失败(不可重试或已耗尽重试): {e}")
+                raise RuntimeError(f"LLM调用失败: {e}") from e
 
     def _build_data_anchored_prompt(
         self,
@@ -706,16 +767,18 @@ class BaseAgent(ABC):
 
         raw_response = self._call_llm(prompt, system_prompt)
 
-        # 解析JSON响应
         parsed = self._parse_json_response(raw_response)
 
-        # 验证输出是否包含期望字段
         validated = {}
         for field in output_fields:
             if field in parsed:
                 validated[field] = parsed[field]
             else:
                 validated[field] = ""
+
+        if not parsed and raw_response.strip():
+            validated["summary"] = raw_response.strip()[:500]
+            logger.info(f"[{self.name}] JSON解析失败，使用原始文本作为summary ({len(raw_response)} chars)")
 
         return validated
 

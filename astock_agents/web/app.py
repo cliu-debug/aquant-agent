@@ -2251,13 +2251,14 @@ async def get_llm_providers(request: Request):
     config = get_llm_config()
 
     providers = []
-    provider_names = ["openrouter", "openai", "anthropic", "qwen", "deepseek", "zhipu", "ollama"]
+    provider_names = ["local", "openrouter", "openai", "anthropic", "qwen", "deepseek", "zhipu", "ollama"]
     for name in provider_names:
         pconfig = config.get(name, {})
         api_key = pconfig.get("api_key", "")
         providers.append({
             "id": name,
             "name": {
+                "local": "本地模型 (llama.cpp/vLLM/LM Studio)",
                 "openrouter": "OpenRouter (免费模型)",
                 "openai": "OpenAI",
                 "anthropic": "Anthropic",

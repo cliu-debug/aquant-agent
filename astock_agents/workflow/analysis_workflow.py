@@ -9,6 +9,7 @@
 """
 
 import json
+import os
 from typing import Dict, Any, Optional, TypedDict, Annotated, List, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -257,7 +258,6 @@ class AnalysisWorkflow:
 
         logger.info("[工作流] 开始并行分析（技术/基本面/情绪/新闻）")
 
-        # 定义分析任务
         analysis_tasks = {
             "technical": (self.technical_analyst.analyze, stock_data),
             "fundamental": (self.fundamental_analyst.analyze, stock_data),
@@ -265,25 +265,42 @@ class AnalysisWorkflow:
             "news": (self.news_analyst.analyze, stock_data),
         }
 
-        # 并行执行
-        futures = {}
-        for name, (func, data) in analysis_tasks.items():
-            future = self._executor.submit(func, data)
-            futures[future] = name
+        sequential_mode = os.getenv("LLM_SEQUENTIAL_MODE", "auto")
+        if sequential_mode == "auto":
+            llm_provider = os.getenv("LLM_PROVIDER", "local")
+            sequential_mode = "true" if llm_provider == "local" else "false"
 
-        # 收集结果
-        for future in as_completed(futures):
-            name = futures[future]
-            try:
-                result = future.result(timeout=60)  # 单个分析最多60秒
-                state[name] = result
-                signal = result.signal.value if hasattr(result, "signal") else "N/A"
-                logger.info(f"[工作流] {name} 分析完成: {signal}")
-            except Exception as e:
-                error_msg = f"{name} 分析失败: {str(e)}"
-                logger.error(f"[工作流] {error_msg}")
-                state["errors"] = state.get("errors", []) + [error_msg]
-                state[name] = None
+        if sequential_mode == "true":
+            logger.info("[工作流] 本地模型模式：串行执行分析（避免并发冲突）")
+            for name, (func, data) in analysis_tasks.items():
+                try:
+                    result = func(data)
+                    state[name] = result
+                    signal = result.signal.value if hasattr(result, "signal") else "N/A"
+                    logger.info(f"[工作流] {name} 分析完成: {signal}")
+                except Exception as e:
+                    error_msg = f"{name} 分析失败: {str(e)}"
+                    logger.error(f"[工作流] {error_msg}")
+                    state["errors"] = state.get("errors", []) + [error_msg]
+                    state[name] = None
+        else:
+            futures = {}
+            for name, (func, data) in analysis_tasks.items():
+                future = self._executor.submit(func, data)
+                futures[future] = name
+
+            for future in as_completed(futures):
+                name = futures[future]
+                try:
+                    result = future.result(timeout=300)
+                    state[name] = result
+                    signal = result.signal.value if hasattr(result, "signal") else "N/A"
+                    logger.info(f"[工作流] {name} 分析完成: {signal}")
+                except Exception as e:
+                    error_msg = f"{name} 分析失败: {str(e)}"
+                    logger.error(f"[工作流] {error_msg}")
+                    state["errors"] = state.get("errors", []) + [error_msg]
+                    state[name] = None
 
         completed = sum(1 for k in ["technical", "fundamental", "sentiment", "news"] if state.get(k))
         logger.info(f"[工作流] 并行分析完成: {completed}/4 个维度成功")

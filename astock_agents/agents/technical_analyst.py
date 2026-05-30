@@ -132,8 +132,12 @@ class TechnicalAnalyst(BaseAgent):
                 llm_insight = self._llm_enhance_analysis(
                     stock_data, trend, indicators, patterns, signal
                 )
+                logger.info(f"[{self.name}] LLM增强结果字段: {list(llm_insight.keys())}")
                 if llm_insight.get("summary"):
                     summary = llm_insight["summary"]
+                    logger.info(f"[{self.name}] LLM增强summary已替换, 长度={len(summary)}")
+                else:
+                    logger.warning(f"[{self.name}] LLM增强返回的summary为空, 字段值: {[(k, str(v)[:50]) for k, v in llm_insight.items()]}")
             except Exception as e:
                 logger.warning(f"[{self.name}] LLM增强分析失败，使用规则引擎结果: {e}")
 
