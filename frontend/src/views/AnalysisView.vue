@@ -1,41 +1,754 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, defineAsyncComponent } from 'vue'
-import { useAgentStore } from '@/stores/agentStore'
-import { AgentStatus, WorkflowStage, LogLevel, Signal, RiskLevel } from '@/types/agent'
-import type { Agent, AgentOutput } from '@/types/agent'
-import { analyzeStock, getPopularStocks, getAnalysisHistory, type AnalyzeResponse, type PopularStock } from '@/services/api'
-import { getSectorRotation, type SectorRotationResult } from '@/services/api'
+import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
+import * as echarts from 'echarts/core'
+import { CandlestickChart, LineChart, BarChart } from 'echarts/charts'
+import {
+  GridComponent,
+  TooltipComponent,
+  DataZoomComponent,
+  LegendComponent,
+} from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import { analyzeStock, getPopularStocks, type AnalyzeResponse, type PopularStock } from '@/services/api'
 
-const AgentScene = defineAsyncComponent(() => import('@/components/visualization/AgentScene.vue'))
-import WorkflowGraph from '@/components/workflow/WorkflowGraph.vue'
-import AgentCard from '@/components/agents/AgentCard.vue'
-import LogConsole from '@/components/dashboard/LogConsole.vue'
-import ResultCard from '@/components/dashboard/ResultCard.vue'
-import KLineChart from '@/components/chart/KLineChart.vue'
+echarts.use([
+  CandlestickChart,
+  LineChart,
+  BarChart,
+  GridComponent,
+  TooltipComponent,
+  DataZoomComponent,
+  LegendComponent,
+  CanvasRenderer,
+])
 
-const store = useAgentStore()
+/** K线数据项接口 */
+interface KLineItem {
+  date: string
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+}
+
+/** 智能体卡片数据接口 */
+interface AgentCardData {
+  id: string
+  name: string
+  icon: string
+  signal: string
+  confidence: number
+  summary: string
+  metrics: Array<{ label: string; value: string }>
+  expanded: boolean
+}
+
+/** 信号颜色映射 */
+const SIGNAL_COLORS: Record<string, string> = {
+  strong_buy: '#00B96B',
+  buy: '#26A69A',
+  hold: '#787B86',
+  sell: '#EF5350',
+  strong_sell: '#C62828',
+}
+
+/** 信号中文映射 */
+const SIGNAL_LABELS: Record<string, string> = {
+  strong_buy: '强烈买入',
+  buy: '买入',
+  hold: '持有',
+  sell: '卖出',
+  strong_sell: '强烈卖出',
+}
 
 const stockCode = ref('')
 const stockName = ref('')
-const selectedAgent = ref<Agent | null>(null)
-const show3D = ref(true)
+const isAnalyzing = ref(false)
 const analysisError = ref<string | null>(null)
 const popularStocks = ref<PopularStock[]>([])
-const sectorRotation = ref<SectorRotationResult | null>(null)
-const sectorLoading = ref(false)
-const analysisHistory = ref<Array<Record<string, unknown>>>([])
-const historyLoading = ref(false)
-const klineData = ref<Array<{date: string, open: number, high: number, low: number, close: number, volume: number}>>([])
+const expandedAgentId = ref<string | null>(null)
 
-const isAnalyzing = computed(() => store.isRunning)
-const overallProgress = computed(() => store.overallProgress)
+/** API响应数据 */
+const analysisData = ref<AnalyzeResponse | null>(null)
+const klineData = ref<KLineItem[]>([])
 
-onMounted(async () => {
-  store.initAgents()
-  await loadPopularStocks()
+/** ECharts 实例 */
+const chartRef = ref<HTMLElement | null>(null)
+let chartInstance: echarts.ECharts | null = null
+
+/** 智能体卡片列表 */
+const agentCards = computed<AgentCardData[]>(() => {
+  if (!analysisData.value) return []
+  const d = analysisData.value
+  const cards: AgentCardData[] = []
+
+  if (d.technical_analysis) {
+    const ta = d.technical_analysis as Record<string, unknown>
+    cards.push({
+      id: 'technical',
+      name: '技术分析',
+      icon: '📊',
+      signal: String(ta.signal || 'hold'),
+      confidence: Number(ta.confidence || 0),
+      summary: String(ta.summary || '').substring(0, 80),
+      metrics: extractMetrics(ta, ['ma_trend', 'macd_signal', 'rsi_value', 'kdj_signal', 'boll_position', 'atr_value']),
+      expanded: expandedAgentId.value === 'technical',
+    })
+  }
+
+  if (d.fundamental_analysis) {
+    const fa = d.fundamental_analysis as Record<string, unknown>
+    cards.push({
+      id: 'fundamental',
+      name: '基本面分析',
+      icon: '📋',
+      signal: String(fa.signal || 'hold'),
+      confidence: Number(fa.confidence || 0),
+      summary: String(fa.summary || '').substring(0, 80),
+      metrics: extractMetrics(fa, ['pe_ttm', 'pb', 'roe', 'revenue_growth', 'profit_growth', 'debt_ratio']),
+      expanded: expandedAgentId.value === 'fundamental',
+    })
+  }
+
+  if (d.sentiment_analysis) {
+    const sa = d.sentiment_analysis as Record<string, unknown>
+    cards.push({
+      id: 'sentiment',
+      name: '情绪分析',
+      icon: '💭',
+      signal: String(sa.signal || 'hold'),
+      confidence: Number(sa.confidence || 0),
+      summary: String(sa.summary || '').substring(0, 80),
+      metrics: extractMetrics(sa, ['fear_greed_index', 'sentiment_score', 'social_volume', 'news_sentiment']),
+      expanded: expandedAgentId.value === 'sentiment',
+    })
+  }
+
+  if (d.news_analysis) {
+    const na = d.news_analysis as Record<string, unknown>
+    cards.push({
+      id: 'news',
+      name: '新闻分析',
+      icon: '📰',
+      signal: String(na.signal || 'hold'),
+      confidence: Number(na.confidence || 0),
+      summary: String(na.summary || '').substring(0, 80),
+      metrics: extractMetrics(na, ['positive_count', 'negative_count', 'neutral_count', 'impact_score']),
+      expanded: expandedAgentId.value === 'news',
+    })
+  }
+
+  if (d.debate) {
+    const db = d.debate as Record<string, unknown>
+    cards.push({
+      id: 'debate',
+      name: '多空辩论',
+      icon: '⚖️',
+      signal: String(db.winner || 'hold'),
+      confidence: Number(db.cooperation_score || 0),
+      summary: '多空双方辩论分析',
+      metrics: extractMetrics(db, ['bull_score', 'bear_score', 'cooperation_score', 'winner']),
+      expanded: expandedAgentId.value === 'debate',
+    })
+  }
+
+  if (d.risk_assessment) {
+    const ra = d.risk_assessment as Record<string, unknown>
+    cards.push({
+      id: 'risk',
+      name: '风险评估',
+      icon: '🛡️',
+      signal: riskToSignal(String(ra.risk_level || 'medium')),
+      confidence: Number(ra.risk_score || 50),
+      summary: String(ra.summary || '').substring(0, 80),
+      metrics: extractMetrics(ra, ['risk_level', 'var_estimate', 'max_drawdown', 'volatility']),
+      expanded: expandedAgentId.value === 'risk',
+    })
+  }
+
+  if (d.trade_proposal) {
+    const tp = d.trade_proposal as Record<string, unknown>
+    cards.push({
+      id: 'trade',
+      name: '交易建议',
+      icon: '🎯',
+      signal: String(tp.direction || 'hold'),
+      confidence: Number(tp.confidence || 0),
+      summary: `建议${tp.direction === 'buy' ? '买入' : tp.direction === 'sell' ? '卖出' : '持有'}`,
+      metrics: extractMetrics(tp, ['direction', 'position_size_pct', 'entry_price', 'target_price', 'stop_loss_price']),
+      expanded: expandedAgentId.value === 'trade',
+    })
+  }
+
+  return cards
 })
 
-async function loadPopularStocks() {
+/** 多头论点 */
+const bullArguments = computed<string[]>(() => {
+  if (!analysisData.value?.debate) return []
+  const db = analysisData.value.debate as Record<string, unknown>
+  const args = db.bull_arguments
+  if (Array.isArray(args)) return args.map(String)
+  return []
+})
+
+/** 空头论点 */
+const bearArguments = computed<string[]>(() => {
+  if (!analysisData.value?.debate) return []
+  const db = analysisData.value.debate as Record<string, unknown>
+  const args = db.bear_arguments
+  if (Array.isArray(args)) return args.map(String)
+  return []
+})
+
+/** 最终信号颜色 */
+const finalSignalColor = computed(() => {
+  const sig = analysisData.value?.final_signal || 'hold'
+  return SIGNAL_COLORS[sig] || SIGNAL_COLORS.hold
+})
+
+/** 最终信号标签 */
+const finalSignalLabel = computed(() => {
+  const sig = analysisData.value?.final_signal || 'hold'
+  return SIGNAL_LABELS[sig] || '持有'
+})
+
+/** 价格变化 */
+const priceChange = computed(() => {
+  if (!klineData.value || klineData.value.length < 2) return { change: 0, pct: 0 }
+  const last = klineData.value[klineData.value.length - 1]
+  const prev = klineData.value[klineData.value.length - 2]
+  const change = last.close - prev.close
+  const pct = prev.close > 0 ? (change / prev.close) * 100 : 0
+  return { change, pct }
+})
+
+/** 关键指标 */
+const keyIndicators = computed(() => {
+  const fa = analysisData.value?.fundamental_analysis as Record<string, unknown> | null
+  return {
+    pe: fa?.pe_ttm ? Number(fa.pe_ttm).toFixed(1) : '-',
+    pb: fa?.pb ? Number(fa.pb).toFixed(2) : '-',
+    roe: fa?.roe ? Number(fa.roe).toFixed(1) + '%' : '-',
+    revGrowth: fa?.revenue_growth ? Number(fa.revenue_growth).toFixed(1) + '%' : '-',
+  }
+})
+
+/** 数据源状态 */
+const dataSources = computed(() => {
+  if (!analysisData.value) return {}
+  return (analysisData.value as Record<string, unknown>).data_sources_used as Record<string, string> || {}
+})
+
+/** 免责声明 */
+const disclaimer = computed(() => {
+  return (analysisData.value as Record<string, unknown>)?.disclaimer as string || '本分析仅供参考，不构成投资建议。投资有风险，入市需谨慎。'
+})
+
+/** 从对象中提取指定key的指标 */
+function extractMetrics(data: Record<string, unknown>, keys: string[]): Array<{ label: string; value: string }> {
+  const result: Array<{ label: string; value: string }> = []
+  for (const key of keys) {
+    if (data[key] !== undefined && data[key] !== null) {
+      const val = data[key]
+      result.push({
+        label: formatMetricLabel(key),
+        value: typeof val === 'number' ? val.toFixed(2) : String(val),
+      })
+    }
+  }
+  return result
+}
+
+/** 格式化指标标签 */
+function formatMetricLabel(key: string): string {
+  const map: Record<string, string> = {
+    ma_trend: 'MA趋势',
+    macd_signal: 'MACD',
+    rsi_value: 'RSI',
+    kdj_signal: 'KDJ',
+    boll_position: '布林',
+    atr_value: 'ATR',
+    pe_ttm: 'PE(TTM)',
+    pb: 'PB',
+    roe: 'ROE',
+    revenue_growth: '营收增长',
+    profit_growth: '利润增长',
+    debt_ratio: '负债率',
+    fear_greed_index: '恐惧贪婪',
+    sentiment_score: '情绪分',
+    social_volume: '社交量',
+    news_sentiment: '新闻情绪',
+    positive_count: '正面',
+    negative_count: '负面',
+    neutral_count: '中性',
+    impact_score: '影响分',
+    bull_score: '多头分',
+    bear_score: '空头分',
+    cooperation_score: '合作分',
+    winner: '胜方',
+    risk_level: '风险等级',
+    var_estimate: 'VaR',
+    max_drawdown: '最大回撤',
+    volatility: '波动率',
+    risk_score: '风险分',
+    direction: '方向',
+    position_size_pct: '仓位%',
+    entry_price: '入场价',
+    target_price: '目标价',
+    stop_loss_price: '止损价',
+    confidence: '置信度',
+  }
+  return map[key] || key
+}
+
+/** 风险等级转信号 */
+function riskToSignal(level: string): string {
+  if (level.includes('低') || level === 'low') return 'buy'
+  if (level.includes('高') || level === 'high') return 'sell'
+  if (level.includes('极') || level === 'extreme') return 'strong_sell'
+  return 'hold'
+}
+
+/** 计算MA均线 */
+function calculateMA(days: number, data: KLineItem[]): (number | null)[] {
+  const result: (number | null)[] = []
+  for (let i = 0; i < data.length; i++) {
+    if (i < days - 1) {
+      result.push(null)
+    } else {
+      let sum = 0
+      for (let j = 0; j < days; j++) {
+        sum += data[i - j].close
+      }
+      result.push(Number((sum / days).toFixed(2)))
+    }
+  }
+  return result
+}
+
+/** 计算MACD */
+function calculateMACD(data: KLineItem[], shortPeriod: number = 12, longPeriod: number = 26, signalPeriod: number = 9): {
+  dif: (number | null)[]
+  dea: (number | null)[]
+  macd: (number | null)[]
+} {
+  const closes = data.map(d => d.close)
+  const dif: (number | null)[] = []
+  const dea: (number | null)[] = []
+  const macd: (number | null)[] = []
+
+  let emaShort = closes[0]
+  let emaLong = closes[0]
+  let emaSignal = 0
+
+  for (let i = 0; i < closes.length; i++) {
+    if (i === 0) {
+      emaShort = closes[0]
+      emaLong = closes[0]
+      dif.push(null)
+      dea.push(null)
+      macd.push(null)
+      continue
+    }
+
+    emaShort = (closes[i] * 2 / (shortPeriod + 1)) + emaShort * (1 - 2 / (shortPeriod + 1))
+    emaLong = (closes[i] * 2 / (longPeriod + 1)) + emaLong * (1 - 2 / (longPeriod + 1))
+    const difVal = emaShort - emaLong
+
+    if (i === 1) {
+      emaSignal = difVal
+    } else {
+      emaSignal = (difVal * 2 / (signalPeriod + 1)) + emaSignal * (1 - 2 / (signalPeriod + 1))
+    }
+
+    dif.push(Number(difVal.toFixed(4)))
+    dea.push(Number(emaSignal.toFixed(4)))
+    macd.push(Number(((difVal - emaSignal) * 2).toFixed(4)))
+  }
+
+  return { dif, dea, macd }
+}
+
+/** 计算RSI */
+function calculateRSI(data: KLineItem[], period: number = 14): (number | null)[] {
+  const result: (number | null)[] = []
+  let gainSum = 0
+  let lossSum = 0
+
+  for (let i = 0; i < data.length; i++) {
+    if (i === 0) {
+      result.push(null)
+      continue
+    }
+
+    const change = data[i].close - data[i - 1].close
+    const gain = change > 0 ? change : 0
+    const loss = change < 0 ? Math.abs(change) : 0
+
+    if (i <= period) {
+      gainSum += gain
+      lossSum += loss
+      if (i === period) {
+        const avgGain = gainSum / period
+        const avgLoss = lossSum / period
+        const rsi = avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss))
+        result.push(Number(rsi.toFixed(2)))
+      } else {
+        result.push(null)
+      }
+    } else {
+      const prevAvgGain = gainSum / period
+      const prevAvgLoss = lossSum / period
+      const avgGain = (prevAvgGain * (period - 1) + gain) / period
+      const avgLoss = (prevAvgLoss * (period - 1) + loss) / period
+      gainSum = avgGain * period
+      lossSum = avgLoss * period
+      const rsi = avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss))
+      result.push(Number(rsi.toFixed(2)))
+    }
+  }
+
+  return result
+}
+
+/** 初始化ECharts K线图 */
+function initChart(): void {
+  if (!chartRef.value) return
+  chartInstance = echarts.init(chartRef.value, undefined, {
+    renderer: 'canvas',
+  })
+  updateChart()
+}
+
+/** 更新K线图数据 */
+function updateChart(): void {
+  if (!chartInstance || klineData.value.length === 0) return
+
+  const data = klineData.value
+  const dates = data.map(d => d.date)
+  const ohlc = data.map(d => [d.open, d.close, d.low, d.high])
+  const volumes = data.map(d => d.volume)
+  const ma5 = calculateMA(5, data)
+  const ma10 = calculateMA(10, data)
+  const ma20 = calculateMA(20, data)
+  const ma60 = calculateMA(60, data)
+  const { dif, dea, macd } = calculateMACD(data)
+  const rsi = calculateRSI(data)
+
+  chartInstance.setOption({
+    animation: false,
+    backgroundColor: '#131722',
+    legend: {
+      show: true,
+      top: 2,
+      left: 60,
+      textStyle: { color: '#787B86', fontSize: 10 },
+      itemWidth: 12,
+      itemHeight: 8,
+      itemGap: 8,
+    },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross', crossStyle: { color: '#363a45' } },
+      backgroundColor: 'rgba(19, 23, 34, 0.95)',
+      borderColor: '#363a45',
+      textStyle: { color: '#D1D4DC', fontSize: 11, fontFamily: 'Consolas, monospace' },
+    },
+    axisPointer: {
+      link: [{ xAxisIndex: [0, 1, 2] }],
+    },
+    grid: [
+      { left: 50, right: 50, top: 24, height: '42%' },
+      { left: 50, right: 50, top: '52%', height: '14%' },
+      { left: 50, right: 50, top: '72%', height: '10%' },
+      { left: 50, right: 50, top: '87%', height: '8%' },
+    ],
+    xAxis: [
+      {
+        type: 'category',
+        data: dates,
+        gridIndex: 0,
+        axisLine: { lineStyle: { color: '#363a45' } },
+        axisTick: { show: false },
+        axisLabel: { show: false },
+        splitLine: { show: true, lineStyle: { color: '#1E222D', type: 'solid' } },
+      },
+      {
+        type: 'category',
+        data: dates,
+        gridIndex: 1,
+        axisLine: { lineStyle: { color: '#363a45' } },
+        axisTick: { show: false },
+        axisLabel: { show: false },
+        splitLine: { show: false },
+      },
+      {
+        type: 'category',
+        data: dates,
+        gridIndex: 2,
+        axisLine: { lineStyle: { color: '#363a45' } },
+        axisTick: { show: false },
+        axisLabel: { show: false },
+        splitLine: { show: false },
+      },
+      {
+        type: 'category',
+        data: dates,
+        gridIndex: 3,
+        axisLine: { lineStyle: { color: '#363a45' } },
+        axisTick: { show: false },
+        axisLabel: { color: '#787B86', fontSize: 9 },
+        splitLine: { show: false },
+      },
+    ],
+    yAxis: [
+      {
+        scale: true,
+        gridIndex: 0,
+        position: 'right',
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: { color: '#787B86', fontSize: 9, fontFamily: 'Consolas, monospace' },
+        splitLine: { lineStyle: { color: '#1E222D', type: 'solid' } },
+      },
+      {
+        scale: true,
+        gridIndex: 1,
+        position: 'right',
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: { color: '#787B86', fontSize: 9, fontFamily: 'Consolas, monospace' },
+        splitLine: { lineStyle: { color: '#1E222D', type: 'dashed' } },
+      },
+      {
+        scale: true,
+        gridIndex: 2,
+        position: 'right',
+        min: 0,
+        max: 100,
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: { color: '#787B86', fontSize: 9, fontFamily: 'Consolas, monospace' },
+        splitLine: { lineStyle: { color: '#1E222D', type: 'dashed' } },
+      },
+      {
+        scale: true,
+        gridIndex: 3,
+        position: 'right',
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: { color: '#787B86', fontSize: 9, fontFamily: 'Consolas, monospace' },
+        splitLine: { show: false },
+      },
+    ],
+    dataZoom: [
+      {
+        type: 'inside',
+        xAxisIndex: [0, 1, 2, 3],
+        start: 60,
+        end: 100,
+      },
+      {
+        type: 'slider',
+        xAxisIndex: [0, 1, 2, 3],
+        start: 60,
+        end: 100,
+        height: 14,
+        bottom: 2,
+        borderColor: '#363a45',
+        backgroundColor: '#131722',
+        fillerColor: 'rgba(33, 150, 243, 0.15)',
+        handleStyle: { color: '#2196F3', borderColor: '#2196F3' },
+        textStyle: { color: '#787B86', fontSize: 9 },
+        dataBackground: {
+          lineStyle: { color: '#363a45' },
+          areaStyle: { color: '#1E222D' },
+        },
+      },
+    ],
+    series: [
+      {
+        name: 'K线',
+        type: 'candlestick',
+        data: ohlc,
+        xAxisIndex: 0,
+        yAxisIndex: 0,
+        itemStyle: {
+          color: '#EF5350',
+          color0: '#26A69A',
+          borderColor: '#EF5350',
+          borderColor0: '#26A69A',
+        },
+      },
+      {
+        name: 'MA5',
+        type: 'line',
+        data: ma5,
+        xAxisIndex: 0,
+        yAxisIndex: 0,
+        smooth: true,
+        showSymbol: false,
+        lineStyle: { width: 1, color: '#F5C842' },
+      },
+      {
+        name: 'MA10',
+        type: 'line',
+        data: ma10,
+        xAxisIndex: 0,
+        yAxisIndex: 0,
+        smooth: true,
+        showSymbol: false,
+        lineStyle: { width: 1, color: '#2196F3' },
+      },
+      {
+        name: 'MA20',
+        type: 'line',
+        data: ma20,
+        xAxisIndex: 0,
+        yAxisIndex: 0,
+        smooth: true,
+        showSymbol: false,
+        lineStyle: { width: 1, color: '#E040FB' },
+      },
+      {
+        name: 'MA60',
+        type: 'line',
+        data: ma60,
+        xAxisIndex: 0,
+        yAxisIndex: 0,
+        smooth: true,
+        showSymbol: false,
+        lineStyle: { width: 1, color: '#FF9800' },
+      },
+      {
+        name: '成交量',
+        type: 'bar',
+        data: volumes,
+        xAxisIndex: 1,
+        yAxisIndex: 1,
+        itemStyle: {
+          color: (params: { dataIndex: number }) => {
+            const idx = params.dataIndex
+            if (!data[idx]) return '#363a45'
+            return data[idx].close >= data[idx].open
+              ? 'rgba(38,166,154,0.6)'
+              : 'rgba(239,83,80,0.6)'
+          },
+        },
+      },
+      {
+        name: 'DIF',
+        type: 'line',
+        data: dif,
+        xAxisIndex: 2,
+        yAxisIndex: 2,
+        showSymbol: false,
+        lineStyle: { width: 1, color: '#2196F3' },
+      },
+      {
+        name: 'DEA',
+        type: 'line',
+        data: dea,
+        xAxisIndex: 2,
+        yAxisIndex: 2,
+        showSymbol: false,
+        lineStyle: { width: 1, color: '#FF9800' },
+      },
+      {
+        name: 'MACD',
+        type: 'bar',
+        data: macd,
+        xAxisIndex: 2,
+        yAxisIndex: 2,
+        itemStyle: {
+          color: (params: { data: number | null }) => {
+            return params.data !== null && params.data >= 0
+              ? 'rgba(239,83,80,0.6)'
+              : 'rgba(38,166,154,0.6)'
+          },
+        },
+      },
+      {
+        name: 'RSI(14)',
+        type: 'line',
+        data: rsi,
+        xAxisIndex: 3,
+        yAxisIndex: 3,
+        showSymbol: false,
+        lineStyle: { width: 1, color: '#E040FB' },
+        markLine: {
+          silent: true,
+          symbol: 'none',
+          lineStyle: { color: '#363a45', type: 'dashed', width: 1 },
+          data: [
+            { yAxis: 70, label: { formatter: '70', color: '#787B86', fontSize: 9 } },
+            { yAxis: 30, label: { formatter: '30', color: '#787B86', fontSize: 9 } },
+          ],
+        },
+      },
+    ],
+  }, true)
+}
+
+/** 启动分析 */
+async function startAnalysis(): Promise<void> {
+  if (!stockCode.value.trim() || isAnalyzing.value) return
+
+  isAnalyzing.value = true
+  analysisError.value = null
+  analysisData.value = null
+  expandedAgentId.value = null
+
+  try {
+    const response = await analyzeStock({
+      stock_code: stockCode.value.trim(),
+      stock_name: stockName.value.trim() || undefined,
+    })
+
+    analysisData.value = response
+
+    if (response.price_data && response.price_data.length > 0) {
+      klineData.value = response.price_data
+      await nextTick()
+      updateChart()
+    }
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : '未知错误'
+    analysisError.value = errorMessage
+  } finally {
+    isAnalyzing.value = false
+  }
+}
+
+/** 填充热门股票 */
+function fillStock(code: string, name: string): void {
+  stockCode.value = code
+  stockName.value = name
+}
+
+/** 切换智能体卡片展开 */
+function toggleAgentExpand(id: string): void {
+  expandedAgentId.value = expandedAgentId.value === id ? null : id
+}
+
+/** 获取信号颜色 */
+function getSignalColor(signal: string): string {
+  return SIGNAL_COLORS[signal] || SIGNAL_COLORS.hold
+}
+
+/** 获取信号标签 */
+function getSignalLabel(signal: string): string {
+  return SIGNAL_LABELS[signal] || signal
+}
+
+/** 窗口resize处理 */
+function handleResize(): void {
+  chartInstance?.resize()
+}
+
+onMounted(async () => {
   try {
     const res = await getPopularStocks()
     popularStocks.value = res.stocks
@@ -47,848 +760,915 @@ async function loadPopularStocks() {
       { code: '600036.SH', name: '招商银行', industry: '银行' },
     ]
   }
-}
 
-/** 信号字符串映射 */
-const signalMap: Record<string, Signal> = {
-  strong_buy: Signal.STRONG_BUY,
-  buy: Signal.BUY,
-  hold: Signal.HOLD,
-  sell: Signal.SELL,
-  strong_sell: Signal.STRONG_SELL,
-}
+  await nextTick()
+  initChart()
+  window.addEventListener('resize', handleResize)
+})
 
-/** 风险等级映射 */
-function mapRiskLevel(riskData: Record<string, unknown> | null): RiskLevel {
-  if (!riskData) return RiskLevel.MEDIUM
-  const level = riskData.risk_level as string || riskData.level as string || 'medium'
-  if (level.includes('低') || level === 'low') return RiskLevel.LOW
-  if (level.includes('高') || level === 'high') return RiskLevel.HIGH
-  if (level.includes('极') || level === 'extreme') return RiskLevel.EXTREME
-  return RiskLevel.MEDIUM
-}
+onUnmounted(() => {
+  chartInstance?.dispose()
+  window.removeEventListener('resize', handleResize)
+})
 
-/** 从后端分析结果提取智能体输出 */
-function extractAgentOutput(_key: string, data: Record<string, unknown> | null): AgentOutput | null {
-  if (!data) return null
-  const summary = (data.summary as string) || (data.analysis as string) || JSON.stringify(data).substring(0, 200)
-  const metrics: Record<string, number | string> = {}
-
-  const metricKeys = ['signal', 'confidence', 'score', 'recommendation', 'trend', 'pe_ratio', 'pb_ratio', 'sentiment_score']
-  for (const mk of metricKeys) {
-    if (data[mk] !== undefined && data[mk] !== null) {
-      const val = data[mk]
-      metrics[mk] = typeof val === 'object' ? JSON.stringify(val) : String(val)
-    }
-  }
-
-  const signal = data.signal ? signalMap[data.signal as string] : undefined
-  const confidence = typeof data.confidence === 'number' ? data.confidence : undefined
-
-  return { summary, keyMetrics: metrics, signal, confidence }
-}
-
-/**
- * 启动股票分析 - 调用后端 API
- */
-async function startAnalysis(): Promise<void> {
-  if (!stockCode.value.trim()) return
-  if (store.isRunning) return
-
-  analysisError.value = null
-  store.reset()
-  store.isRunning = true
-
-  addSystemLog(`开始分析 ${stockCode.value}...`)
-
-  const progressController = startProgressSimulation()
-
-  try {
-    const response = await analyzeStock({
-      stock_code: stockCode.value.trim(),
-      stock_name: stockName.value.trim() || undefined,
-    })
-
-    progressController.stop()
-    completeAllAgents()
-    updateAgentOutputs(response)
-    setFinalResultFromResponse(response)
-
-    addSystemLog(`${response.stock_name} 分析完成，信号: ${response.final_signal || '未知'}`)
-
-    // 设置K线数据
-    if (response.price_data && response.price_data.length > 0) {
-      klineData.value = response.price_data
-    }
-
-    // 自动加载该股票的分析历史
-    loadAnalysisHistory(response.stock_code)
-  } catch (err) {
-    progressController.stop()
-    const errorMessage = err instanceof Error ? err.message : '未知错误'
-    analysisError.value = errorMessage
-    store.isRunning = false
-    addSystemLog(`分析失败: ${errorMessage}`, LogLevel.ERROR)
-
-    store.agents.forEach((agent) => {
-      if (agent.status === AgentStatus.RUNNING || agent.status === AgentStatus.INITIALIZING) {
-        store.updateAgentStatus(agent.id, AgentStatus.FAILED, agent.progress)
-      }
-    })
-  }
-}
-
-/**
- * 进度模拟控制器
- * 后端同步执行，前端模拟各阶段进度
- */
-function startProgressSimulation(): { stop: () => void } {
-  let stopped = false
-
-  const phases = [
-    { stage: WorkflowStage.DATA_FETCH, agents: ['data_fetcher'], duration: 1500 },
-    { stage: WorkflowStage.PARALLEL_ANALYSIS, agents: ['technical', 'fundamental', 'sentiment', 'news', 'capital_flow'], duration: 3000 },
-    { stage: WorkflowStage.DEBATE, agents: ['bull', 'bear'], duration: 2000 },
-    { stage: WorkflowStage.RISK_ASSESSMENT, agents: ['risk'], duration: 1500 },
-    { stage: WorkflowStage.DECISION, agents: ['trader'], duration: 1000 },
-  ]
-
-  let delay = 0
-
-  phases.forEach((phase) => {
-    setTimeout(() => {
-      if (stopped) return
-      store.setCurrentPhase(phase.stage)
-
-      phase.agents.forEach((agentId, index) => {
-        setTimeout(() => {
-          if (stopped) return
-          store.updateAgentStatus(agentId, AgentStatus.RUNNING, 10)
-          store.updateAgentProgress(agentId, 10, '正在分析...')
-
-          addAgentLog(agentId, '开始执行分析任务...')
-
-          const progressInterval = setInterval(() => {
-            if (stopped) { clearInterval(progressInterval); return }
-            const agent = store.agents.find(a => a.id === agentId)
-            if (!agent || agent.status !== AgentStatus.RUNNING) { clearInterval(progressInterval); return }
-            const newProgress = Math.min(agent.progress + Math.random() * 15, 90)
-            store.updateAgentProgress(agentId, newProgress)
-          }, 300)
-
-          setTimeout(() => clearInterval(progressInterval), phase.duration + 2000)
-        }, index * 200)
-      })
-    }, delay)
-
-    delay += phase.duration + phase.agents.length * 200
-  })
-
-  return {
-    stop: () => { stopped = true },
-  }
-}
-
-/** 将所有智能体标记为完成 */
-function completeAllAgents(): void {
-  store.agents.forEach((agent) => {
-    if (agent.status !== AgentStatus.COMPLETED && agent.status !== AgentStatus.FAILED) {
-      store.updateAgentStatus(agent.id, AgentStatus.COMPLETED, 100)
-      store.updateAgentProgress(agent.id, 100, '分析完成')
-    }
-  })
-  store.setCurrentPhase(WorkflowStage.DECISION)
-}
-
-/** 从后端响应更新各智能体输出 */
-function updateAgentOutputs(response: AnalyzeResponse): void {
-  const outputMap: Record<string, Record<string, unknown> | null> = {
-    data_fetcher: null,
-    technical: response.technical_analysis,
-    fundamental: response.fundamental_analysis,
-    sentiment: response.sentiment_analysis,
-    news: response.news_analysis,
-    capital_flow: null, // 资金流向通过独立API获取
-    bull: response.debate,
-    bear: response.debate,
-    risk: response.risk_assessment,
-    trader: response.trade_proposal,
-  }
-
-  for (const [agentId, data] of Object.entries(outputMap)) {
-    const output = extractAgentOutput(agentId, data)
-    if (output) {
-      store.setAgentOutput(agentId, output)
-    }
-  }
-}
-
-/** 从后端响应设置最终结果 */
-function setFinalResultFromResponse(response: AnalyzeResponse): void {
-  const signal = signalMap[response.final_signal || 'hold'] || Signal.HOLD
-  const confidence = response.final_confidence || 50
-  const riskLevel = mapRiskLevel(response.risk_assessment)
-
-  const agentViews: AgentOutput[] = []
-  const viewMap: Array<[string, Record<string, unknown> | null]> = [
-    ['technical', response.technical_analysis],
-    ['fundamental', response.fundamental_analysis],
-    ['sentiment', response.sentiment_analysis],
-    ['news', response.news_analysis],
-  ]
-  for (const [key, data] of viewMap) {
-    const output = extractAgentOutput(key, data)
-    if (output) agentViews.push(output)
-  }
-
-  store.setFinalResult({
-    stockCode: response.stock_code,
-    stockName: response.stock_name,
-    currentPrice: response.current_price || 0,
-    changePercent: 0,
-    signal,
-    score: confidence,
-    confidence,
-    riskLevel,
-    summary: response.full_report ? response.full_report.substring(0, 300) : '分析完成',
-    agentViews,
-  })
-}
-
-/** 添加系统日志 */
-function addSystemLog(message: string, level: LogLevel = LogLevel.INFO): void {
-  store.addLog({
-    id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-    timestamp: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
-    level,
-    source: 'system',
-    sourceName: '系统',
-    message,
-  })
-}
-
-/** 添加智能体日志 */
-function addAgentLog(agentId: string, message: string): void {
-  const agent = store.agents.find(a => a.id === agentId)
-  store.addLog({
-    id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-    timestamp: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
-    level: LogLevel.INFO,
-    source: agentId as Agent['type'],
-    sourceName: agent?.name || agentId,
-    message,
-  })
-}
-
-function handleAgentClick(agent: Agent): void {
-  selectedAgent.value = selectedAgent.value?.id === agent.id ? null : agent
-}
-
-function fillStock(code: string, name: string): void {
-  stockCode.value = code
-  stockName.value = name
-}
-
-/** 加载行业轮动决策建议 */
-async function loadSectorRotation(): Promise<void> {
-  sectorLoading.value = true
-  try {
-    const res = await getSectorRotation()
-    sectorRotation.value = res.data
-  } catch (e) {
-    addSystemLog(`行业轮动数据加载失败: ${e instanceof Error ? e.message : '未知错误'}`, LogLevel.WARNING)
-  } finally {
-    sectorLoading.value = false
-  }
-}
-
-/** 加载分析历史记录 */
-async function loadAnalysisHistory(stockCode: string): Promise<void> {
-  historyLoading.value = true
-  try {
-    const res = await getAnalysisHistory(stockCode, 10)
-    if (res.success && res.data) {
-      analysisHistory.value = Array.isArray(res.data) ? res.data : []
-    }
-  } catch {
-    analysisHistory.value = []
-  } finally {
-    historyLoading.value = false
-  }
-}
-
-/** 格式化日期 */
-function formatDate(dateStr: string | unknown): string {
-  if (!dateStr) return '-'
-  try {
-    const d = new Date(String(dateStr))
-    return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-  } catch {
-    return String(dateStr)
-  }
-}
-
-/** 信号颜色 */
-function signalColor(signal: string | unknown): string {
-  const s = String(signal || '').toLowerCase()
-  if (s.includes('buy') || s.includes('买入')) return 'var(--color-positive)'
-  if (s.includes('sell') || s.includes('卖出')) return 'var(--color-negative)'
-  if (s.includes('hold') || s.includes('持有')) return 'var(--color-text-secondary)'
-  return 'var(--color-text-muted)'
-}
+watch(() => klineData.value.length, () => {
+  nextTick(() => updateChart())
+})
 </script>
 
 <template>
-  <div class="analysis-view">
-    <!-- 顶部搜索栏 -->
-    <header class="search-header">
-      <div class="search-box">
-        <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
-        </svg>
-        <input
-          v-model="stockCode"
-          type="text"
-          placeholder="输入股票代码 (如 600519.SH)"
-          class="search-input"
-          @keyup.enter="startAnalysis"
-          :disabled="isAnalyzing"
-        />
-        <input
-          v-model="stockName"
-          type="text"
-          placeholder="股票名称 (可选)"
-          class="search-input name-input"
-          @keyup.enter="startAnalysis"
-          :disabled="isAnalyzing"
-        />
-        <button
-          class="btn-primary analyze-btn"
-          @click="startAnalysis"
-          :disabled="isAnalyzing || !stockCode.trim()"
-        >
-          {{ isAnalyzing ? '分析中...' : '开始分析' }}
-        </button>
+  <div class="tv-view">
+    <!-- 顶部工具栏 -->
+    <header class="tv-toolbar">
+      <div class="tv-toolbar-left">
+        <div class="tv-search">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#787B86" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+          </svg>
+          <input
+            v-model="stockCode"
+            type="text"
+            placeholder="股票代码"
+            class="tv-search-input"
+            @keyup.enter="startAnalysis"
+            :disabled="isAnalyzing"
+          />
+          <input
+            v-model="stockName"
+            type="text"
+            placeholder="名称(可选)"
+            class="tv-search-input tv-search-name"
+            @keyup.enter="startAnalysis"
+            :disabled="isAnalyzing"
+          />
+          <button
+            class="tv-analyze-btn"
+            @click="startAnalysis"
+            :disabled="isAnalyzing || !stockCode.trim()"
+          >
+            {{ isAnalyzing ? '⏳' : '▶' }} 分析
+          </button>
+        </div>
+        <div class="tv-popular">
+          <span class="tv-popular-label">热门</span>
+          <button
+            v-for="s in popularStocks"
+            :key="s.code"
+            class="tv-popular-tag"
+            @click="fillStock(s.code, s.name)"
+            :disabled="isAnalyzing"
+          >
+            {{ s.name }}
+          </button>
+        </div>
       </div>
 
-      <div class="popular-stocks">
-        <span class="popular-label">热门:</span>
-        <button
-          v-for="stock in popularStocks"
-          :key="stock.code"
-          class="popular-tag"
-          @click="fillStock(stock.code, stock.name)"
-          :disabled="isAnalyzing"
-        >
-          {{ stock.name }}
-        </button>
+      <!-- 价格和指标区 -->
+      <div v-if="analysisData" class="tv-price-bar">
+        <div class="tv-stock-identity">
+          <span class="tv-stock-name">{{ analysisData.stock_name }}</span>
+          <span class="tv-stock-code">{{ analysisData.stock_code }}</span>
+        </div>
+        <div class="tv-price-main">
+          <span class="tv-price-value" :class="priceChange.pct >= 0 ? 'tv-up' : 'tv-down'">
+            {{ analysisData.current_price?.toFixed(2) || '-' }}
+          </span>
+          <span class="tv-price-change" :class="priceChange.pct >= 0 ? 'tv-up' : 'tv-down'">
+            {{ priceChange.pct >= 0 ? '+' : '' }}{{ priceChange.change.toFixed(2) }}
+            ({{ priceChange.pct >= 0 ? '+' : '' }}{{ priceChange.pct.toFixed(2) }}%)
+          </span>
+        </div>
+        <div class="tv-key-metrics">
+          <div class="tv-metric">
+            <span class="tv-metric-label">PE</span>
+            <span class="tv-metric-value">{{ keyIndicators.pe }}</span>
+          </div>
+          <div class="tv-metric">
+            <span class="tv-metric-label">PB</span>
+            <span class="tv-metric-value">{{ keyIndicators.pb }}</span>
+          </div>
+          <div class="tv-metric">
+            <span class="tv-metric-label">ROE</span>
+            <span class="tv-metric-value">{{ keyIndicators.roe }}</span>
+          </div>
+          <div class="tv-metric">
+            <span class="tv-metric-label">营收增</span>
+            <span class="tv-metric-value">{{ keyIndicators.revGrowth }}</span>
+          </div>
+        </div>
       </div>
     </header>
 
-    <!-- 总进度条 -->
-    <div v-if="isAnalyzing" class="global-progress">
-      <div class="progress-info">
-        <span class="progress-label">总体进度</span>
-        <span class="progress-value">{{ overallProgress }}%</span>
-      </div>
-      <div class="progress-bar">
-        <div class="progress-fill" :style="{ width: `${overallProgress}%` }"></div>
-      </div>
-    </div>
-
-    <!-- K线图 -->
-    <section v-if="klineData.length > 0" class="kline-section">
-      <KLineChart :data="klineData" :stock-code="stockCode" :stock-name="stockName" />
-    </section>
-
-    <!-- 3D 场景 -->
-    <section class="scene-section" v-if="show3D">
-      <AgentScene :agents="store.agents" />
-      <button class="toggle-3d-btn" @click="show3D = false">收起</button>
-    </section>
-    <section v-else class="scene-collapsed">
-      <button class="toggle-3d-btn" @click="show3D = true">展开场景</button>
-    </section>
-
-    <!-- 工作流进度 -->
-    <section class="workflow-section">
-      <WorkflowGraph :agents="store.agents" :current-phase="store.currentPhase" />
-    </section>
-
-    <!-- 下方内容区 -->
-    <div class="content-grid">
-      <div class="left-panel">
-        <LogConsole :logs="store.logs" :is-running="isAnalyzing" />
-      </div>
-      <div class="right-panel">
-        <div class="agents-grid">
-          <AgentCard
-            v-for="agent in store.agents"
-            :key="agent.id"
-            :agent="agent"
-            @click="handleAgentClick"
-          />
+    <!-- 主体区域 -->
+    <div class="tv-main">
+      <!-- 左侧K线图 -->
+      <div class="tv-chart-area">
+        <div v-if="isAnalyzing" class="tv-chart-loading">
+          <div class="tv-spinner"></div>
+          <span>分析中...</span>
         </div>
-        <Transition name="slide">
-          <ResultCard v-if="store.finalResult" :result="store.finalResult" />
-        </Transition>
+        <div v-if="!analysisData && !isAnalyzing" class="tv-chart-empty">
+          <div class="tv-empty-icon">📈</div>
+          <div class="tv-empty-text">输入股票代码开始分析</div>
+        </div>
+        <div
+          ref="chartRef"
+          class="tv-chart-canvas"
+          :style="{ visibility: klineData.length > 0 ? 'visible' : 'hidden' }"
+        ></div>
+      </div>
 
-        <!-- 决策建议面板 -->
-        <div v-if="store.finalResult" class="decision-panel">
-          <div class="decision-header">
-            <h3 class="decision-title">决策建议</h3>
-            <button class="btn-secondary btn-sm" @click="loadSectorRotation" :disabled="sectorLoading">
-              {{ sectorLoading ? '加载中...' : '获取行业建议' }}
-            </button>
+      <!-- 右侧分析面板 -->
+      <div class="tv-panel">
+        <!-- 最终信号 -->
+        <div v-if="analysisData" class="tv-signal-box" :style="{ borderColor: finalSignalColor }">
+          <div class="tv-signal-left">
+            <span class="tv-signal-label">综合信号</span>
+            <span class="tv-signal-value" :style="{ color: finalSignalColor }">
+              {{ finalSignalLabel }}
+            </span>
           </div>
+          <div class="tv-signal-right">
+            <span class="tv-signal-conf-label">置信度</span>
+            <span class="tv-signal-conf-value" :style="{ color: finalSignalColor }">
+              {{ analysisData.final_confidence || 0 }}%
+            </span>
+          </div>
+        </div>
 
-          <div v-if="sectorRotation" class="decision-content">
-            <!-- 经济周期 -->
-            <div class="cycle-badge">
-              <span class="cycle-label">当前周期</span>
-              <span class="cycle-value">{{ sectorRotation.current_cycle }}</span>
-            </div>
-
-            <!-- 轮动信号 -->
-            <div class="rotation-signal">
-              <span class="signal-label">轮动信号</span>
-              <span class="signal-text">{{ sectorRotation.rotation_signal }}</span>
-            </div>
-
-            <!-- 推荐行业列表 -->
-            <div v-if="sectorRotation.recommendations.length" class="recommendation-list">
-              <div
-                v-for="rec in sectorRotation.recommendations"
-                :key="rec.sector_name"
-                class="recommendation-item"
-              >
-                <div class="rec-rank">{{ rec.rank }}</div>
-                <div class="rec-info">
-                  <div class="rec-name">{{ rec.sector_name }}</div>
-                  <div class="rec-reason">{{ rec.reason }}</div>
-                  <div class="rec-stocks" v-if="rec.matching_stocks.length">
-                    <span class="stock-tag" v-for="code in rec.matching_stocks.slice(0, 3)" :key="code">{{ code }}</span>
-                  </div>
-                </div>
-                <div class="rec-weight">{{ (rec.weight * 100).toFixed(0) }}%</div>
+        <!-- 智能体卡片列表 -->
+        <div class="tv-agents-list">
+          <div
+            v-for="card in agentCards"
+            :key="card.id"
+            class="tv-agent-card"
+            :class="{ 'tv-agent-expanded': card.expanded }"
+            @click="toggleAgentExpand(card.id)"
+          >
+            <div class="tv-agent-header">
+              <div class="tv-agent-info">
+                <span class="tv-agent-icon">{{ card.icon }}</span>
+                <span class="tv-agent-name">{{ card.name }}</span>
+              </div>
+              <div class="tv-agent-signal">
+                <span
+                  class="tv-signal-dot"
+                  :style="{ backgroundColor: getSignalColor(card.signal) }"
+                ></span>
+                <span class="tv-signal-text" :style="{ color: getSignalColor(card.signal) }">
+                  {{ getSignalLabel(card.signal) }}
+                </span>
+                <span class="tv-agent-conf">{{ card.confidence }}%</span>
               </div>
             </div>
-
-            <div v-else class="empty-recommendation">暂无推荐行业</div>
-          </div>
-
-          <div v-else-if="!sectorLoading" class="decision-empty">
-            点击"获取行业建议"查看当前经济周期下的行业配置建议
+            <div v-if="card.summary" class="tv-agent-summary">{{ card.summary }}</div>
+            <div v-if="card.expanded && card.metrics.length > 0" class="tv-agent-metrics">
+              <div v-for="m in card.metrics" :key="m.label" class="tv-metric-row">
+                <span class="tv-metric-key">{{ m.label }}</span>
+                <span class="tv-metric-val">{{ m.value }}</span>
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- 分析历史记录面板 -->
-        <div v-if="store.finalResult" class="history-panel">
-          <div class="history-header">
-            <h3 class="history-title">分析历史</h3>
-            <span v-if="historyLoading" class="history-loading">加载中...</span>
-          </div>
-
-          <div v-if="analysisHistory.length > 0" class="history-list">
-            <div
-              v-for="(record, idx) in analysisHistory"
-              :key="idx"
-              class="history-item"
+        <!-- 多空辩论 -->
+        <div v-if="analysisData?.debate" class="tv-debate">
+          <div class="tv-debate-header">
+            <span class="tv-debate-title">⚔️ 多空辩论</span>
+            <span
+              v-if="(analysisData.debate as Record<string, unknown>).winner"
+              class="tv-debate-winner"
+              :style="{
+                color: String((analysisData.debate as Record<string, unknown>).winner).includes('bull')
+                  ? '#26A69A'
+                  : String((analysisData.debate as Record<string, unknown>).winner).includes('bear')
+                    ? '#EF5350'
+                  : '#787B86'
+              }"
             >
-              <div class="history-left">
-                <span class="history-time">{{ formatDate(record.created_at || record.timestamp) }}</span>
-                <span class="history-signal" :style="{ color: signalColor(record.signal) }">
-                  {{ record.signal || '-' }}
-                </span>
+              {{ String((analysisData.debate as Record<string, unknown>).winner).includes('bull') ? '多头胜' :
+                 String((analysisData.debate as Record<string, unknown>).winner).includes('bear') ? '空头胜' : '平局' }}
+            </span>
+          </div>
+          <div class="tv-debate-cols">
+            <div class="tv-debate-bull">
+              <div class="tv-debate-col-title">🐂 多头</div>
+              <div v-for="(arg, idx) in bullArguments.slice(0, 3)" :key="idx" class="tv-debate-arg tv-bull-arg">
+                {{ arg }}
               </div>
-              <div class="history-right">
-                <span class="history-confidence">
-                  置信度: {{ record.confidence != null ? record.confidence + '%' : '-' }}
-                </span>
-                <span class="history-price">
-                  价格: {{ record.current_price ? '¥' + record.current_price : '-' }}
-                </span>
+            </div>
+            <div class="tv-debate-bear">
+              <div class="tv-debate-col-title">🐻 空头</div>
+              <div v-for="(arg, idx) in bearArguments.slice(0, 3)" :key="idx" class="tv-debate-arg tv-bear-arg">
+                {{ arg }}
               </div>
             </div>
           </div>
+        </div>
 
-          <div v-else-if="!historyLoading" class="history-empty">
-            暂无历史分析记录
+        <!-- 交易建议摘要 -->
+        <div v-if="analysisData?.trade_proposal" class="tv-trade-summary">
+          <div class="tv-trade-header">🎯 交易建议</div>
+          <div class="tv-trade-grid">
+            <div class="tv-trade-cell">
+              <span class="tv-trade-label">方向</span>
+              <span
+                class="tv-trade-value"
+                :style="{
+                  color: String((analysisData.trade_proposal as Record<string, unknown>).direction) === 'buy'
+                    ? '#26A69A'
+                    : String((analysisData.trade_proposal as Record<string, unknown>).direction) === 'sell'
+                      ? '#EF5350'
+                      : '#787B86'
+                }"
+              >
+                {{ String((analysisData.trade_proposal as Record<string, unknown>).direction) === 'buy'
+                  ? '买入' : String((analysisData.trade_proposal as Record<string, unknown>).direction) === 'sell'
+                  ? '卖出' : '持有' }}
+              </span>
+            </div>
+            <div class="tv-trade-cell">
+              <span class="tv-trade-label">仓位</span>
+              <span class="tv-trade-value">{{ (analysisData.trade_proposal as Record<string, unknown>).position_size_pct }}%</span>
+            </div>
+            <div class="tv-trade-cell">
+              <span class="tv-trade-label">入场</span>
+              <span class="tv-trade-value">{{ (analysisData.trade_proposal as Record<string, unknown>).entry_price }}</span>
+            </div>
+            <div class="tv-trade-cell">
+              <span class="tv-trade-label">目标</span>
+              <span class="tv-trade-value tv-up">{{ (analysisData.trade_proposal as Record<string, unknown>).target_price }}</span>
+            </div>
+            <div class="tv-trade-cell">
+              <span class="tv-trade-label">止损</span>
+              <span class="tv-trade-value tv-down">{{ (analysisData.trade_proposal as Record<string, unknown>).stop_loss_price }}</span>
+            </div>
+            <div class="tv-trade-cell">
+              <span class="tv-trade-label">风险</span>
+              <span
+                class="tv-trade-value"
+                :style="{
+                  color: String((analysisData.risk_assessment as Record<string, unknown> | null)?.risk_level).includes('低')
+                    ? '#26A69A'
+                    : String((analysisData.risk_assessment as Record<string, unknown> | null)?.risk_level).includes('高')
+                      ? '#EF5350'
+                      : '#FAAD14'
+                }"
+              >
+                {{ (analysisData.risk_assessment as Record<string, unknown> | null)?.risk_level || '-' }}
+              </span>
+            </div>
           </div>
         </div>
       </div>
     </div>
+
+    <!-- 底部状态栏 -->
+    <footer class="tv-footer">
+      <div class="tv-footer-left">
+        <span class="tv-disclaimer">⚠️ {{ disclaimer }}</span>
+      </div>
+      <div class="tv-footer-right">
+        <template v-if="Object.keys(dataSources).length > 0">
+          <span
+            v-for="(source, key) in dataSources"
+            :key="key"
+            class="tv-data-source"
+          >
+            <span class="tv-source-dot"></span>
+            {{ key }}: {{ source }}
+          </span>
+        </template>
+        <span v-else class="tv-data-source">
+          <span class="tv-source-dot tv-source-off"></span>
+          未连接
+        </span>
+      </div>
+    </footer>
 
     <!-- 错误提示 -->
-    <Transition name="fade">
-      <div v-if="analysisError" class="error-banner">
-        <span class="error-text">{{ analysisError }}</span>
-        <button class="error-close" @click="analysisError = null">&times;</button>
+    <Transition name="tv-fade">
+      <div v-if="analysisError" class="tv-error-toast">
+        <span>❌ {{ analysisError }}</span>
+        <button class="tv-error-close" @click="analysisError = null">×</button>
       </div>
     </Transition>
   </div>
 </template>
 
 <style scoped>
-.analysis-view {
-  padding: 16px 20px;
+.tv-view {
   display: flex;
   flex-direction: column;
+  height: 100vh;
+  background: #131722;
+  color: #D1D4DC;
+  font-size: 12px;
+  overflow: hidden;
+}
+
+/* ===== 顶部工具栏 ===== */
+.tv-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  padding: 0 8px;
+  background: #1E222D;
+  border-bottom: 1px solid #363a45;
+  flex-shrink: 0;
   gap: 12px;
-  min-height: 100vh;
 }
 
-.search-header {
-  background: var(--color-bg-card);
-  border-radius: var(--radius);
-  padding: 14px 16px;
-  border: 1px solid var(--color-border);
-}
-
-.search-box {
+.tv-toolbar-left {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: var(--color-bg-input);
-  border-radius: 2px;
-  padding: 2px 2px 2px 12px;
-  border: 1px solid var(--color-border);
-  transition: border-color 0.2s;
-}
-
-.search-box:focus-within {
-  border-color: var(--color-accent);
-}
-
-.search-icon {
-  color: var(--color-text-muted);
   flex-shrink: 0;
 }
 
-.search-input {
-  background: none;
-  border: none;
-  color: var(--color-text-primary);
-  font-size: 14px;
-  outline: none;
-  width: 180px;
-  padding: 8px 0;
-}
-
-.search-input::placeholder { color: var(--color-text-muted); }
-
-.name-input {
-  width: 120px;
-  border-left: 1px solid var(--color-border);
-  padding-left: 12px;
-}
-
-.analyze-btn {
-  flex-shrink: 0;
-}
-
-.popular-stocks {
+.tv-search {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 10px;
-  flex-wrap: wrap;
+  gap: 4px;
+  background: #131722;
+  border: 1px solid #363a45;
+  padding: 0 6px;
+  height: 24px;
 }
 
-.popular-label { font-size: 12px; color: var(--color-text-muted); }
+.tv-search:focus-within {
+  border-color: #2196F3;
+}
 
-.popular-tag {
-  padding: 3px 10px;
-  background: var(--color-bg-hover);
-  border: 1px solid var(--color-border);
-  border-radius: 2px;
-  color: var(--color-text-secondary);
-  font-size: 12px;
+.tv-search-input {
+  background: none;
+  border: none;
+  color: #D1D4DC;
+  font-size: 11px;
+  outline: none;
+  width: 100px;
+  height: 22px;
+  font-family: 'Consolas', 'Courier New', monospace;
+}
+
+.tv-search-input::placeholder {
+  color: #4A5168;
+}
+
+.tv-search-name {
+  width: 70px;
+  border-left: 1px solid #363a45;
+  padding-left: 6px;
+}
+
+.tv-analyze-btn {
+  padding: 0 10px;
+  height: 24px;
+  background: #2196F3;
+  color: #fff;
+  border: none;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.tv-analyze-btn:hover:not(:disabled) {
+  background: #1E88E5;
+}
+
+.tv-analyze-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.tv-popular {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tv-popular-label {
+  color: #4A5168;
+  font-size: 10px;
+}
+
+.tv-popular-tag {
+  padding: 1px 6px;
+  background: transparent;
+  border: 1px solid #363a45;
+  color: #787B86;
+  font-size: 10px;
   cursor: pointer;
   transition: all 0.15s;
 }
 
-.popular-tag:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent); }
-.popular-tag:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.global-progress { padding: 6px 0; }
-.progress-info { display: flex; justify-content: space-between; margin-bottom: 4px; }
-.progress-label { font-size: 12px; color: var(--color-text-secondary); }
-.progress-value { font-size: 12px; color: var(--color-accent); font-weight: 600; }
-.progress-bar { height: 2px; background: var(--color-bg-hover); border-radius: 1px; overflow: hidden; }
-.progress-fill {
-  height: 100%;
-  background: var(--color-accent);
-  border-radius: 1px;
-  transition: width 0.5s ease;
+.tv-popular-tag:hover:not(:disabled) {
+  border-color: #2196F3;
+  color: #2196F3;
 }
 
-.kline-section { margin-bottom: 12px; }
-
-.scene-section { position: relative; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--color-border); }
-.scene-collapsed { display: flex; justify-content: center; padding: 6px; }
-.toggle-3d-btn {
-  position: absolute; top: 8px; right: 8px; z-index: 10;
-  padding: 4px 10px; background: rgba(0,0,0,0.6); backdrop-filter: blur(8px);
-  border: 1px solid var(--color-border); border-radius: 2px;
-  color: var(--color-text-secondary); font-size: 12px; cursor: pointer; transition: all 0.15s;
-}
-.toggle-3d-btn:hover { background: rgba(0,0,0,0.8); color: var(--color-text-primary); }
-.scene-collapsed .toggle-3d-btn { position: static; background: var(--color-bg-card); }
-
-.workflow-section { border-radius: var(--radius); overflow: hidden; }
-
-.content-grid { display: grid; grid-template-columns: 1fr 1.5fr; gap: 12px; flex: 1; }
-.left-panel { min-width: 0; }
-.right-panel { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-.agents-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-
-.error-banner {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 14px; background: rgba(245, 34, 45, 0.08);
-  border: 1px solid rgba(245, 34, 45, 0.2); border-radius: var(--radius);
-}
-.error-text { flex: 1; color: var(--color-negative); font-size: 13px; }
-.error-close { background: none; border: none; color: var(--color-text-muted); cursor: pointer; font-size: 16px; padding: 2px 6px; }
-
-/* 决策建议面板 */
-.decision-panel {
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: 16px;
+.tv-popular-tag:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
-.decision-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.decision-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--color-text-primary);
-}
-
-.btn-sm {
-  padding: 4px 12px;
-  font-size: 12px;
-}
-
-.decision-content {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.cycle-badge {
+/* 价格指标区 */
+.tv-price-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background: rgba(37, 99, 235, 0.08);
-  border: 1px solid rgba(37, 99, 235, 0.2);
-  border-radius: var(--radius);
-}
-
-.cycle-label {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-}
-
-.cycle-value {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--color-accent);
-}
-
-.rotation-signal {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 12px;
-  background: var(--color-bg-primary);
-  border-radius: var(--radius);
-}
-
-.signal-label {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-}
-
-.signal-text {
-  font-size: 13px;
-  color: var(--color-text-primary);
-  line-height: 1.5;
-}
-
-.recommendation-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.recommendation-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px 12px;
-  background: var(--color-bg-primary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-}
-
-.rec-rank {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: var(--color-accent);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 700;
+  gap: 16px;
   flex-shrink: 0;
 }
 
-.rec-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.rec-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  margin-bottom: 2px;
-}
-
-.rec-reason {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  line-height: 1.4;
-  margin-bottom: 4px;
-}
-
-.rec-stocks {
+.tv-stock-identity {
   display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-
-.stock-tag {
-  padding: 1px 6px;
-  background: var(--color-bg-hover);
-  border: 1px solid var(--color-border);
-  border-radius: 2px;
-  font-size: 11px;
-  color: var(--color-text-muted);
-}
-
-.rec-weight {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--color-accent);
-  flex-shrink: 0;
-}
-
-.empty-recommendation,
-.decision-empty {
-  text-align: center;
-  color: var(--color-text-muted);
-  font-size: 13px;
-  padding: 16px 0;
-}
-
-/* 分析历史面板 */
-.history-panel {
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: 16px;
-}
-
-.history-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.history-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--color-text-primary);
-}
-
-.history-loading {
-  font-size: 12px;
-  color: var(--color-text-muted);
-}
-
-.history-list {
-  display: flex;
-  flex-direction: column;
+  align-items: baseline;
   gap: 6px;
 }
 
-.history-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 12px;
-  background: var(--color-bg-primary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-}
-
-.history-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.history-time {
-  font-size: 12px;
-  color: var(--color-text-muted);
-}
-
-.history-signal {
+.tv-stock-name {
   font-size: 13px;
   font-weight: 600;
+  color: #D1D4DC;
 }
 
-.history-right {
+.tv-stock-code {
+  font-size: 10px;
+  color: #787B86;
+  font-family: 'Consolas', monospace;
+}
+
+.tv-price-main {
   display: flex;
-  align-items: center;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.tv-price-value {
+  font-size: 16px;
+  font-weight: 700;
+  font-family: 'Consolas', monospace;
+}
+
+.tv-price-change {
+  font-size: 11px;
+  font-family: 'Consolas', monospace;
+}
+
+.tv-up { color: #EF5350; }
+.tv-down { color: #26A69A; }
+
+.tv-key-metrics {
+  display: flex;
   gap: 12px;
 }
 
-.history-confidence,
-.history-price {
+.tv-metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+
+.tv-metric-label {
+  font-size: 9px;
+  color: #4A5168;
+}
+
+.tv-metric-value {
+  font-size: 11px;
+  color: #D1D4DC;
+  font-family: 'Consolas', monospace;
+}
+
+/* ===== 主体区域 ===== */
+.tv-main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 左侧K线图 */
+.tv-chart-area {
+  flex: 0 0 60%;
+  position: relative;
+  border-right: 1px solid #363a45;
+}
+
+.tv-chart-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.tv-chart-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(19, 23, 34, 0.85);
+  z-index: 10;
+  color: #787B86;
   font-size: 12px;
-  color: var(--color-text-secondary);
 }
 
-.history-empty {
-  text-align: center;
-  color: var(--color-text-muted);
+.tv-spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid #363a45;
+  border-top-color: #2196F3;
+  border-radius: 50%;
+  animation: tv-spin 0.8s linear infinite;
+}
+
+@keyframes tv-spin {
+  to { transform: rotate(360deg); }
+}
+
+.tv-chart-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #4A5168;
+}
+
+.tv-empty-icon {
+  font-size: 36px;
+}
+
+.tv-empty-text {
   font-size: 13px;
-  padding: 16px 0;
 }
 
-@media (max-width: 1400px) { .agents-grid { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 1024px) {
-  .content-grid { grid-template-columns: 1fr; }
-  .agents-grid { grid-template-columns: repeat(2, 1fr); }
+/* 右侧面板 */
+.tv-panel {
+  flex: 0 0 40%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #131722;
 }
+
+/* 最终信号 */
+.tv-signal-box {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  border-left: 3px solid #787B86;
+  background: #1E222D;
+  flex-shrink: 0;
+}
+
+.tv-signal-left,
+.tv-signal-right {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.tv-signal-label,
+.tv-signal-conf-label {
+  font-size: 10px;
+  color: #787B86;
+}
+
+.tv-signal-value {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.tv-signal-conf-value {
+  font-size: 14px;
+  font-weight: 700;
+  font-family: 'Consolas', monospace;
+}
+
+/* 智能体卡片列表 */
+.tv-agents-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.tv-agent-card {
+  padding: 4px 6px;
+  border-bottom: 1px solid #1E222D;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.tv-agent-card:hover {
+  background: #1E222D;
+}
+
+.tv-agent-expanded {
+  background: #1E222D;
+}
+
+.tv-agent-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tv-agent-info {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tv-agent-icon {
+  font-size: 12px;
+}
+
+.tv-agent-name {
+  font-size: 11px;
+  font-weight: 500;
+  color: #D1D4DC;
+}
+
+.tv-agent-signal {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tv-signal-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.tv-signal-text {
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.tv-agent-conf {
+  font-size: 10px;
+  color: #787B86;
+  font-family: 'Consolas', monospace;
+}
+
+.tv-agent-summary {
+  font-size: 10px;
+  color: #787B86;
+  padding: 2px 0 2px 18px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-agent-metrics {
+  padding: 4px 0 2px 18px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px 12px;
+}
+
+.tv-metric-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1px 0;
+}
+
+.tv-metric-key {
+  font-size: 10px;
+  color: #4A5168;
+}
+
+.tv-metric-val {
+  font-size: 10px;
+  color: #D1D4DC;
+  font-family: 'Consolas', monospace;
+}
+
+/* 多空辩论 */
+.tv-debate {
+  border-top: 1px solid #363a45;
+  padding: 6px 8px;
+  flex-shrink: 0;
+  background: #1E222D;
+}
+
+.tv-debate-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.tv-debate-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #D1D4DC;
+}
+
+.tv-debate-winner {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.tv-debate-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.tv-debate-col-title {
+  font-size: 10px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.tv-debate-bull .tv-debate-col-title {
+  color: #26A69A;
+}
+
+.tv-debate-bear .tv-debate-col-title {
+  color: #EF5350;
+}
+
+.tv-debate-arg {
+  font-size: 10px;
+  line-height: 1.4;
+  padding: 1px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-bull-arg {
+  color: #26A69A;
+}
+
+.tv-bear-arg {
+  color: #EF5350;
+}
+
+/* 交易建议 */
+.tv-trade-summary {
+  border-top: 1px solid #363a45;
+  padding: 6px 8px;
+  flex-shrink: 0;
+  background: #1E222D;
+}
+
+.tv-trade-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: #D1D4DC;
+  margin-bottom: 4px;
+}
+
+.tv-trade-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px 8px;
+}
+
+.tv-trade-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.tv-trade-label {
+  font-size: 9px;
+  color: #4A5168;
+}
+
+.tv-trade-value {
+  font-size: 11px;
+  font-weight: 600;
+  color: #D1D4DC;
+  font-family: 'Consolas', monospace;
+}
+
+/* ===== 底部状态栏 ===== */
+.tv-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  background: #1E222D;
+  border-top: 1px solid #363a45;
+  flex-shrink: 0;
+}
+
+.tv-footer-left {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-disclaimer {
+  font-size: 9px;
+  color: #4A5168;
+}
+
+.tv-footer-right {
+  display: flex;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.tv-data-source {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9px;
+  color: #787B86;
+}
+
+.tv-source-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #26A69A;
+}
+
+.tv-source-off {
+  background: #4A5168;
+}
+
+/* 错误提示 */
+.tv-error-toast {
+  position: fixed;
+  top: 44px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: rgba(239, 83, 80, 0.15);
+  border: 1px solid rgba(239, 83, 80, 0.3);
+  color: #EF5350;
+  font-size: 11px;
+  z-index: 100;
+}
+
+.tv-error-close {
+  background: none;
+  border: none;
+  color: #EF5350;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+}
+
+/* 动画 */
+.tv-fade-enter-active,
+.tv-fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.tv-fade-enter-from,
+.tv-fade-leave-to {
+  opacity: 0;
+}
+
+/* 响应式 */
+@media (max-width: 1024px) {
+  .tv-main {
+    flex-direction: column;
+  }
+  .tv-chart-area {
+    flex: 0 0 50%;
+    border-right: none;
+    border-bottom: 1px solid #363a45;
+  }
+  .tv-panel {
+    flex: 1;
+  }
+  .tv-key-metrics {
+    display: none;
+  }
+}
+
 @media (max-width: 768px) {
-  .analysis-view { padding: 10px; }
-  .name-input { display: none; }
-  .search-input { width: 120px; }
-  .agents-grid { grid-template-columns: 1fr; }
+  .tv-search-name {
+    display: none;
+  }
+  .tv-popular {
+    display: none;
+  }
+  .tv-price-bar {
+    gap: 8px;
+  }
 }
 </style>
