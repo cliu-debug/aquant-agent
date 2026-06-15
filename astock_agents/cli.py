@@ -1,4 +1,4 @@
-"""AStockAgents 命令行界面"""
+"""AQuant-Agent 命令行界面"""
 
 import argparse
 import sys
@@ -36,7 +36,7 @@ def _print_banner():
     """打印横幅"""
     print("""
 ╔══════════════════════════════════════════════════════════════╗
-║  AStockAgents - 多智能体协同股票分析系统 v0.1.0             ║
+║  AQuant-Agent - A股量化智能体 v0.1.0                        ║
 ╚══════════════════════════════════════════════════════════════╝
 """)
 
@@ -152,8 +152,8 @@ def cmd_server(args):
 def main():
     """主入口"""
     parser = argparse.ArgumentParser(
-        description="AStockAgents - 多智能体协同股票分析系统",
-        prog="astock-agents"
+        description="AQuant-Agent - A股量化智能体",
+        prog="aquant-agent"
     )
     parser.add_argument("--config", "-c", help="配置文件路径", default=None)
     parser.add_argument("--log-level", help="日志级别", default="INFO",

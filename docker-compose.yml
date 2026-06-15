@@ -1,11 +1,11 @@
 version: '3.8'
 
 services:
-  astock-agents:
+  aquant-agent:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: astock-agents
+    container_name: aquant-agent
     ports:
       - "8000:8000"
     environment:
@@ -38,4 +38,4 @@ volumes:
 
 networks:
   default:
-    name: astock-network
+    name: aquant-network

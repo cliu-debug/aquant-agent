@@ -21,7 +21,7 @@ setup(
     description="A股量化智能体 - 10个AI分析师协同决策",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/cliu-debug/astock-agents",
+    url="https://github.com/cliu-debug/aquant-agent",
     packages=find_packages(),
     classifiers=[
         "Development Status :: 3 - Alpha",

@@ -6,8 +6,8 @@
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-CC%20BY--NC%204.0-blue)](LICENSE)
-[![GitHub Stars](https://img.shields.io/github/stars/cliu-debug/astock-agents?style=social)](https://github.com/cliu-debug/astock-agents)
-[![GitHub Release](https://img.shields.io/github/v/release/cliu-debug/astock-agents)](https://github.com/cliu-debug/astock-agents/releases)
+[![GitHub Stars](https://img.shields.io/github/stars/cliu-debug/aquant-agent?style=social)](https://github.com/cliu-debug/aquant-agent)
+[![GitHub Release](https://img.shields.io/github/v/release/cliu-debug/aquant-agent)](https://github.com/cliu-debug/aquant-agent/releases)
 
 **一句话说清楚**：用 LangGraph 编排 10 个专业 AI 智能体，模拟顶级投研团队的分析流程，为 A 股投资者提供全方位、多维度的智能决策支持。
 

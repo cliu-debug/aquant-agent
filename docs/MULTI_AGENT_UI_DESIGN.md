@@ -1,4 +1,4 @@
-# AStockAgents 多智能体可视化界面设计方案
+# AQuant-Agent 多智能体可视化界面设计方案
 
 ## 一、项目概述
 

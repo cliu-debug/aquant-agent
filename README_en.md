@@ -4,8 +4,8 @@
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-CC%20BY--NC%204.0-blue)](LICENSE)
-[![Stars](https://img.shields.io/github/stars/astock-agents/astock-agents?style=social)](https://github.com/astock-agents/astock-agents)
-[![GitHub Release](https://img.shields.io/github/v/release/astock-agents/astock-agents)](https://github.com/astock-agents/astock-agents/releases)
+[![Stars](https://img.shields.io/github/stars/cliu-debug/aquant-agent?style=social)](https://github.com/cliu-debug/aquant-agent)
+[![GitHub Release](https://img.shields.io/github/v/release/cliu-debug/aquant-agent)](https://github.com/cliu-debug/aquant-agent/releases)
 
 **Multi-Agent Collaborative Stock Analysis System for A-Share Market**
 

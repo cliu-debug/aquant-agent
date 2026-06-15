@@ -1,4 +1,4 @@
-# AStockAgents 使用指南
+# AQuant-Agent 使用指南
 
 ## 快速开始
 
@@ -6,8 +6,8 @@
 
 ```bash
 # 克隆项目
-git clone https://github.com/yourusername/astock-agents.git
-cd astock-agents
+git clone https://github.com/cliu-debug/aquant-agent.git
+cd aquant-agent
 
 # 安装依赖
 pip install -r requirements.txt
