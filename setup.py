@@ -14,14 +14,14 @@ with open("requirements-dev.txt", "r", encoding="utf-8") as fh:
     ]
 
 setup(
-    name="astock-agents",
+    name="aquant-agent",
     version="0.1.0",
-    author="AStockAgents",
-    author_email="astock-agents@proton.me",
-    description="多智能体协作驱动的A股投研框架",
+    author="AQuant-Agent",
+    author_email="aquant-agent@proton.me",
+    description="A股量化智能体 - 10个AI分析师协同决策",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/astock-agents/astock-agents",
+    url="https://github.com/cliu-debug/astock-agents",
     packages=find_packages(),
     classifiers=[
         "Development Status :: 3 - Alpha",
@@ -41,7 +41,7 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "astock-agents=astock_agents.cli:main",
+            "aquant-agent=astock_agents.cli:main",
         ],
     },
 )

@@ -1,157 +1,132 @@
-# AStockAgents 🤖
-
 <div align="center">
+
+# 🧠 AQuant-Agent
+
+**A股量化智能体 - 10个AI分析师协同决策**
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-CC%20BY--NC%204.0-blue)](LICENSE)
-[![Stars](https://img.shields.io/github/stars/astock-agents/astock-agents?style=social)](https://github.com/astock-agents/astock-agents)
-[![GitHub Release](https://img.shields.io/github/v/release/astock-agents/astock-agents)](https://github.com/astock-agents/astock-agents/releases)
+[![GitHub Stars](https://img.shields.io/github/stars/cliu-debug/astock-agents?style=social)](https://github.com/cliu-debug/astock-agents)
+[![GitHub Release](https://img.shields.io/github/v/release/cliu-debug/astock-agents)](https://github.com/cliu-debug/astock-agents/releases)
 
-**Multi-Agent Collaborative Stock Analysis System**
+**一句话说清楚**：用 LangGraph 编排 10 个专业 AI 智能体，模拟顶级投研团队的分析流程，为 A 股投资者提供全方位、多维度的智能决策支持。
 
-A comprehensive AI-driven stock analysis framework built on LangGraph, featuring 10 specialized agents for technical analysis, fundamental analysis, sentiment analysis, bull/bear debate, risk management, and more.
-
-## 🎨 截图预览
-
-![3D智能体可视化](screenshots/3D可视化.gif)
-
-![可视化分析](screenshots/可视化分析.gif)
-
-[快速开始](#快速开始) · [功能特性](#功能特性) · [架构设计](#架构设计) · [多LLM支持](#多llm支持) · [API文档](#api文档)
+[🚀 5分钟快速体验](#-5分钟快速体验) · [✨ 核心亮点](#-核心亮点) · [📊 效果展示](#-效果展示) · [🏗️ 架构设计](#️-架构设计)
 
 </div>
 
 ---
 
-## 📖 项目简介
+## 🎯 为什么选择 AQuant-Agent？
 
-AStockAgents 是一个面向 **A股市场** 的智能量化分析系统，采用多智能体协同架构，模拟专业投资研究团队的工作流程。
-
-### 🎯 核心创新
-
-| 创新点 | 说明 |
-|--------|------|
-| **10个专业智能体** | 技术/基本面/情绪/新闻/资金流向/多空辩论/交易/风控 |
-| **三层混合决策架构** | 规则引擎+LLM增强+风控强制 |
-| **年轮记忆系统** | 投资画像、偏好学习、持续进化 |
-| **博弈论辩论** | 纳什均衡、囚徒困境、多轮对抗 |
-| **金融合规设计** | 免责声明注入、FOMO检测、审计日志 |
-| **多源数据降级** | mootdx→akshare→腾讯→东财→百度→巨潮 |
-
-### 👥 智能体团队
-
-```
-数据获取 ──┬── 技术分析师 ──┐
-           ├── 基本面分析师 ──┤
-           ├── 情绪分析师   ──┤
-           ├── 新闻分析师   ──┤
-           ├── 资金流向分析师 ──┤
-           └── 宏观分析师   ──┘
-                              │
-              多头研究员 ←──→ 空头研究员
-                     (博弈论辩论)
-                         │
-              交易员 ←────→ 风险管理
-                     ↓
-                  决策输出
-```
+| 传统量化工具 | AQuant-Agent |
+|-------------|--------------|
+| 单一指标分析 | **10个智能体协同**：技术+基本面+情绪+新闻+资金流+多空辩论 |
+| 静态规则 | **LLM增强决策**：本地模型/免费API，零成本运行 |
+| 无记忆 | **年轮记忆系统**：学习你的投资偏好，持续进化 |
+| 无风控 | **三层风控**：合规审查+FOMO检测+仓位管理 |
+| 通用市场 | **A股垂直优化**：6级数据源降级，A股全覆盖 |
 
 ---
 
-## ✨ 功能特性
+## 📊 效果展示
 
-### 核心功能
+### 🤖 3D智能体可视化
+![3D智能体可视化](screenshots/3D可视化.gif)
 
-- 🔥 **多源数据整合**: 6级数据源自动降级，A股全覆盖
-- 📊 **全面技术分析**: 10+技术指标、15+K线形态识别
-- 🤖 **LLM智能增强**: 本地模型/OpenRouter免费/国产LLM
-- ⚖️ **博弈论辩论**: 多轮对抗、纳什均衡、囚徒困境
-- 📈 **完整回测系统**: 3年A股回测、Sharpe/最大回撤/胜率
-- 🛡️ **金融合规设计**: 免责声明、FOMO检测、审计追踪
-- 🧠 **年轮记忆系统**: 投资画像、偏好学习、持续进化
-- 🔌 **MCP协议支持**: 6个标准化金融工具接口
-
-### 技术指标
-
-| 指标 | 说明 |
-|------|------|
-| MA(5,10,20,60,120) | 移动平均线系统 |
-| MACD | 指数平滑异同移动平均线 |
-| RSI | 相对强弱指标 |
-| KDJ | 随机指标 |
-| Bollinger | 布林带 |
-| ATR | 真实波幅 |
-| OBV | 能量潮 |
-| Williams %R | 威廉指标 |
-| CCI | 顺势指标 |
-| ADX | 平均趋向指标 |
-
-### K线形态
-
-- 吞没形态（看涨/看跌）
-- 孕线形态
-- 早晨之星/黄昏之星
-- 锤子线/流星线
-- 双底/双顶
-- 头肩顶/头肩底
-- 三只白兵/三只乌鸦
+### 📈 多维度分析看板
+![可视化分析](screenshots/可视化分析.gif)
 
 ---
 
-## 🚀 快速开始
-
-### 环境要求
-
-- Python 3.10+
-- Windows/Linux/macOS
-
-### 安装
+## 🚀 5分钟快速体验
 
 ```bash
-# 克隆项目
-git clone https://github.com/astock-agents/astock-agents.git
+# 1️⃣ 克隆项目
+git clone https://github.com/cliu-debug/astock-agents.git
 cd astock-agents
 
-# 创建虚拟环境
-python -m venv .venv
-source .venv/bin/activate  # Linux/macOS
-# .venv\Scripts\activate  # Windows
-
-# 安装依赖
+# 2️⃣ 安装依赖
 pip install -r requirements.txt
 
-# 安装项目
-pip install -e .
-```
+# 3️⃣ 配置LLM（三选一）
+# 方式A：本地模型（推荐，完全免费）
+# 下载 llama.cpp 运行 gemma4 模型，默认 http://127.0.0.1:8080
 
-### 配置
+# 方式B：OpenRouter免费API
+export LLM_PROVIDER=openrouter
+export OPENROUTER_API_KEY=your_key
 
-```bash
-# 复制配置模板
-cp .env.example .env
+# 方式C：国产LLM（通义千问/DeepSeek/智谱）
+export LLM_PROVIDER=qwen
+export QWEN_API_KEY=your_key
 
-# 编辑配置（至少配置一个LLM提供商）
-# LLM_PROVIDER=local  # 本地模型
-# LLM_PROVIDER=openrouter  # OpenRouter免费模型
-# LLM_PROVIDER=qwen  # 通义千问
-```
-
-### 运行
-
-```bash
-# 命令行Demo
+# 4️⃣ 运行Demo
 python examples/demo.py --code 600519.SH --name 贵州茅台
 
-# Web界面
+# 5️⃣ 启动Web界面
 python -m astock_agents.web.app
 # 访问 http://localhost:8000
 ```
 
-### Docker部署
+---
 
-```bash
-# 使用Docker Compose
-docker-compose up -d
+## ✨ 核心亮点
+
+### 🤝 10个专业智能体协同
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    AQuant-Agent 智能体团队                    │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  📊 技术分析师    📈 基本面分析师    😊 情绪分析师            │
+│  📰 新闻分析师    💰 资金流向分析师  🌍 宏观分析师            │
+│                                                              │
+│           🐂 多头研究员 ←──博弈论辩论──→ 🐻 空头研究员        │
+│                                                              │
+│                    🎯 交易员 ←──→ 🛡️ 风险管理               │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 🧠 三层混合决策架构
+
+| 层级 | 职责 | 示例 |
+|------|------|------|
+| **规则引擎层** | 快速过滤、硬性约束 | 涨跌停过滤、ST股排除 |
+| **LLM增强层** | 语义理解、推理决策 | 新闻情绪解读、形态识别 |
+| **风控强制层** | 安全边界、合规审查 | 仓位限制、FOMO检测 |
+
+### 🔄 年轮记忆系统
+
+```python
+# 系统会记住你的投资偏好
+user_memory.learn(
+    user_id="user_001",
+    action="买入",
+    stock="贵州茅台",
+    reason="看好白酒板块",
+    outcome="盈利15%"
+)
+
+# 下次分析时自动参考
+recommendation = user_memory.recall("白酒板块")
+# → "您上次看好白酒板块盈利15%，建议关注..."
+```
+
+### 🎭 博弈论多空辩论
+
+```python
+# 模拟真实投研会议
+debate = DebateEngine(
+    bull_researcher=BullResearcher(),  # 多头观点
+    bear_researcher=BearResearcher(),  # 空头观点
+    rounds=3  # 三轮对抗
+)
+
+result = debate.run(stock_data)
+# → 纳什均衡决策，避免单一视角偏见
 ```
 
 ---
@@ -160,7 +135,7 @@ docker-compose up -d
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        AStockAgents                          │
+│                      AQuant-Agent                            │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
 │  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐   │
@@ -198,33 +173,15 @@ docker-compose up -d
 
 ## 🔌 多LLM支持
 
-### 支持的提供商
-
-| 提供商 | 免费额度 | 模型示例 |
+| 提供商 | 免费额度 | 推荐模型 |
 |--------|----------|----------|
-| **本地模型** | 完全免费 | gemma4, llama3, Qwen |
+| **本地模型** ✨ | 完全免费 | gemma4, llama3, Qwen |
 | **OpenRouter** | 每日免费 | google/gemma-4-31b-it:free |
 | **通义千问** | 有免费额度 | qwen-turbo |
 | **DeepSeek** | 有免费额度 | deepseek-chat |
 | **智谱AI** | 有免费额度 | glm-4 |
 | **OpenAI** | 付费 | GPT-4o |
 | **Anthropic** | 付费 | Claude-3.5 |
-
-### 配置示例
-
-```bash
-# .env
-
-# 本地模型（推荐gemma4）
-LLM_PROVIDER=local
-LOCAL_LLM_BASE_URL=http://127.0.0.1:8080/v1
-LOCAL_LLM_MODEL=gemma4
-
-# 或使用OpenRouter免费模型
-LLM_PROVIDER=openrouter
-OPENROUTER_API_KEY=your_key
-OPENROUTER_MODEL=google/gemma-4-31b-it:free
-```
 
 ---
 
@@ -234,7 +191,6 @@ OPENROUTER_MODEL=google/gemma-4-31b-it:free
 
 ```python
 from astock_agents.workflow.analysis_workflow import AnalysisWorkflow
-from astock_agents.models.stock_data import StockData
 
 # 创建工作流
 workflow = AnalysisWorkflow()
@@ -242,8 +198,8 @@ workflow = AnalysisWorkflow()
 # 执行分析
 result = workflow.run(stock_code="600519.SH", stock_name="贵州茅台")
 
-print(f"最终信号: {result.final_signal}")
-print(f"置信度: {result.final_confidence}%")
+print(f"最终信号: {result.final_signal}")        # BUY/SELL/HOLD
+print(f"置信度: {result.final_confidence}%")   # 0-100
 print(f"技术分析: {result.technical_analysis.summary}")
 print(f"多空辩论: {result.debate.bull_thesis}")
 ```
@@ -259,9 +215,6 @@ curl -X POST "http://localhost:8000/api/analyze" \
 # 获取热门股票
 curl "http://localhost:8000/api/stocks/popular"
 
-# 多股对比
-curl "http://localhost:8000/api/compare?stock_codes=600519.SH,000858.SZ"
-
 # 策略回测
 curl -X POST "http://localhost:8000/api/backtest" \
   -H "Content-Type: application/json" \
@@ -269,14 +222,6 @@ curl -X POST "http://localhost:8000/api/backtest" \
 ```
 
 详细使用请参考 [使用指南](docs/USER_GUIDE.md)
-
----
-
-## 📖 API文档
-
-启动Web服务后访问：
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
 
 ---
 
@@ -288,9 +233,6 @@ pytest
 
 # 带覆盖率报告
 pytest --cov=astock_agents --cov-report=html
-
-# 运行特定测试
-pytest tests/test_agents_layer.py -v
 ```
 
 ---
@@ -298,46 +240,18 @@ pytest tests/test_agents_layer.py -v
 ## 📁 项目结构
 
 ```
-astock-agents/
+aquant-agent/
 ├── astock_agents/           # 主包
 │   ├── agents/              # 10个智能体
-│   │   ├── technical_analyst.py    # 技术分析师
-│   │   ├── fundamental_analyst.py # 基本面分析师
-│   │   ├── sentiment_analyst.py    # 情绪分析师
-│   │   ├── news_analyst.py         # 新闻分析师
-│   │   ├── capital_flow_analyst.py # 资金流向分析师
-│   │   ├── macro_analyst.py        # 宏观分析师
-│   │   ├── bull_researcher.py      # 多头研究员
-│   │   ├── bear_researcher.py      # 空头研究员
-│   │   ├── trader.py               # 交易员
-│   │   └── risk_manager.py         # 风险管理
 │   ├── data/                # 6级数据源
-│   │   ├── mootdx_client.py
-│   │   ├── akshare_client.py
-│   │   ├── tencent_client.py
-│   │   ├── eastmoney_client.py
-│   │   └── data_manager.py
 │   ├── services/            # 22个服务
-│   │   ├── compliance.py         # 合规审查
-│   │   ├── fomo_guard.py         # FOMO检测
-│   │   ├── backtest.py           # 回测引擎
-│   │   ├── user_memory.py        # 年轮记忆
-│   │   └── ...
 │   ├── workflow/            # LangGraph工作流
-│   ├── models/             # Pydantic数据模型
-│   ├── web/                # FastAPI Web服务
-│   └── config.py           # 配置管理
+│   ├── models/              # Pydantic数据模型
+│   └── web/                 # FastAPI Web服务
 ├── frontend/                # Vue3前端
-│   └── src/
-│       ├── views/          # 14个页面
-│       ├── components/     # 可视化组件
-│       └── services/       # API服务
-├── tests/                  # 单元测试
-├── scripts/                # 回测脚本
-├── docs/                   # 技术文档
-├── Dockerfile
-├── docker-compose.yml
-└── requirements.txt
+├── tests/                   # 单元测试
+├── docs/                    # 技术文档
+└── examples/                # 示例代码
 ```
 
 ---
@@ -387,14 +301,13 @@ astock-agents/
 - [LangGraph](https://github.com/langchain-ai/langgraph) - 工作流编排
 - [Akshare](https://github.com/akfamily/akshare) - 金融数据接口
 - [Mootdx](https://github.com/moomindesigns/mootdx) - 通达信接口
-- [TradingAgents](https://github.com/TauricResearch/TradingAgents) - 多智能体框架参考
 
 ---
 
 <div align="center">
 
-如果这个项目对你有帮助，请给一个 ⭐️ Star 支持一下！
+**如果这个项目对你有帮助，请给一个 ⭐️ Star 支持一下！**
 
-Made with ❤️ by AStockAgents Team
+Made with ❤️ by AQuant-Agent Team
 
 </div>
