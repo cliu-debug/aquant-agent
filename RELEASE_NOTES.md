@@ -20,8 +20,8 @@
 ## 快速开始
 
 ```bash
-git clone https://github.com/cliu-debug/astock-agents.git
-cd astock-agents
+git clone https://github.com/cliu-debug/aquant-agent.git
+cd aquant-agent
 pip install -r requirements.txt
 python -m astock_agents.web.app
 ```

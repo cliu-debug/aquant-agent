@@ -19,7 +19,7 @@ from astock_agents.utils.report_formatter import ReportFormatter
 
 
 def main():
-    parser = argparse.ArgumentParser(description="AStockAgents 单股票分析")
+    parser = argparse.ArgumentParser(description="AQuant-Agent 单股票分析")
     parser.add_argument(
         "--code",
         type=str,
@@ -47,7 +47,7 @@ def main():
     
     args = parser.parse_args()
     
-    print(f"🚀 启动 AStockAgents 分析...")
+    print(f"🚀 启动 AQuant-Agent 分析...")
     print(f"📊 分析股票: {args.code} {args.name or ''}")
     print("-" * 60)
     

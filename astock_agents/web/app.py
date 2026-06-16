@@ -1,5 +1,5 @@
 """
-AStockAgents Web界面
+AQuant-Agent Web界面
 
 基于FastAPI的交互式分析界面，接入核心工作流引擎
 """
@@ -35,7 +35,7 @@ limiter = Limiter(key_func=get_remote_address)
 
 # 创建FastAPI应用
 app = FastAPI(
-    title="AStockAgents",
+    title="AQuant-Agent",
     description="多智能体协同股票分析系统",
     version="1.0.0"
 )
@@ -183,7 +183,7 @@ async def root(request: Request):
         from fastapi.responses import FileResponse
         return FileResponse(index_path)
     return HTMLResponse(
-        "<h1>AStockAgents</h1>"
+        "<h1>AQuant-Agent</h1>"
         "<p>API文档: <a href='/docs'>/docs</a></p>"
         "<p>分析接口: POST /api/analyze</p>"
     )
@@ -1159,7 +1159,7 @@ async def notification_test(request: Request):
     service = get_notification_service()
     message = NotificationMessage(
         title="测试通知",
-        body="这是一条来自AStockAgents的测试通知，如果您收到此消息，说明通知服务配置正确。",
+        body="这是一条来自AQuant-Agent的测试通知，如果您收到此消息，说明通知服务配置正确。",
         level="info",
     )
     success = service.send(message)

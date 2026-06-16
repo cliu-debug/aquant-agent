@@ -115,7 +115,7 @@ SECRET_KEY=your-secret-key-here
 
 如需紧急联系，请通过以下方式：
 
-- GitHub：https://github.com/astock-agents/astock-agents
+- GitHub：https://github.com/cliu-debug/aquant-agent
 
 ---
 

@@ -514,8 +514,8 @@ class BaseAgent(ABC):
                     api_key=api_key,
                     base_url=base_url,
                     default_headers={
-                        "HTTP-Referer": "https://github.com/astock-agents",
-                        "X-Title": "AStockAgents",
+                        "HTTP-Referer": "https://github.com/cliu-debug/aquant-agent",
+                        "X-Title": "AQuant-Agent",
                     },
                 )
             elif provider == "local":

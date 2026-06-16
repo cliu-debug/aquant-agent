@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-AStockAgents 完整演示脚本
+AQuant-Agent 完整演示脚本
 
 演示多智能体协同分析系统的完整工作流程：
 1. 数据获取 - 从多个数据源获取股票数据
@@ -453,7 +453,7 @@ def main():
     """主函数"""
     import argparse
     
-    parser = argparse.ArgumentParser(description="AStockAgents 股票分析演示")
+    parser = argparse.ArgumentParser(description="AQuant-Agent 股票分析演示")
     parser.add_argument("--code", "-c", default="600519.SH", help="股票代码")
     parser.add_argument("--name", "-n", default="贵州茅台", help="股票名称")
     parser.add_argument("--batch", "-b", action="store_true", help="批量分析模式")

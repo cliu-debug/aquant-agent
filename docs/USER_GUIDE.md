@@ -236,13 +236,13 @@ print(f"投资建议: {report.final_decision.recommendation}")
 ### 构建镜像
 
 ```bash
-docker build -t astock-agents .
+docker build -t aquant-agent .
 ```
 
 ### 运行容器
 
 ```bash
-docker run -d -p 8000:8000 astock-agents
+docker run -d -p 8000:8000 aquant-agent
 ```
 
 ### Docker Compose

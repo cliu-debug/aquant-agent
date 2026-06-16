@@ -433,7 +433,7 @@ def generate_report(all_results: Dict[str, Dict[str, Any]]) -> str:
     """
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     lines = [
-        f"# AStockAgents 3年A股回测报告",
+        f"# AQuant-Agent 3年A股回测报告",
         f"",
         f"**生成时间**: {now}",
         f"**回测区间**: 2023-06 ~ 2026-05 (约3年)",
@@ -570,7 +570,7 @@ def generate_report(all_results: Dict[str, Dict[str, Any]]) -> str:
 def main():
     """主函数：下载数据 → 生成信号 → 回测 → 输出报告"""
     print("=" * 60)
-    print("  AStockAgents 3年A股回测")
+    print("  AQuant-Agent 3年A股回测")
     print("=" * 60)
     print(f"  选股池: {len(STOCK_POOL)}只")
     print(f"  策略: MA金叉死叉 / MACD / RSI")

@@ -26,7 +26,7 @@
 ### 1.3 目录结构
 
 ```
-astock-agents-web/
+aquant-agent-web/
 ├── src/
 │   ├── components/
 │   │   ├── agents/                    # 智能体相关组件

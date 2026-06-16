@@ -288,4 +288,4 @@ astock-agents/
 
 感谢所有为 AStockAgents 做出贡献的开发者！
 
-[![Contributors](https://contrib.rocks/image?repo=astock-agents/astock-agents)](https://github.com/astock-agents/astock-agents/graphs/contributors)
+[![Contributors](https://contrib.rocks/image?repo=cliu-debug/aquant-agent)](https://github.com/cliu-debug/aquant-agent/graphs/contributors)

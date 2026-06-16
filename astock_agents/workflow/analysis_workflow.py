@@ -1023,7 +1023,7 @@ class AnalysisWorkflow:
         """生成完整报告文本"""
         lines = [
             "=" * 60,
-            "AStockAgents 分析报告",
+            "AQuant-Agent 分析报告",
             f"股票: {state['stock_name']} ({state['stock_code']})",
             f"分析时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             "=" * 60,

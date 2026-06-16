@@ -1,4 +1,4 @@
-# AStockAgents Dockerfile
+# AQuant-Agent Dockerfile
 # 多智能体股票分析系统
 
 FROM python:3.11-slim

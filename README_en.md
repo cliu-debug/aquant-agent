@@ -1,4 +1,4 @@
-# AStockAgents 🤖
+# AQuant-Agent 🤖
 
 <div align="center">
 
@@ -103,8 +103,8 @@ Data Acquisition ─┬── Technical Analyst ──┐
 
 ```bash
 # Clone the project
-git clone https://github.com/astock-agents/astock-agents.git
-cd astock-agents
+git clone https://github.com/cliu-debug/aquant-agent.git
+cd aquant-agent
 
 # Create virtual environment
 python -m venv .venv

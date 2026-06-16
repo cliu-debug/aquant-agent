@@ -43,8 +43,8 @@
 
 ```bash
 # 1️⃣ 克隆项目
-git clone https://github.com/cliu-debug/astock-agents.git
-cd astock-agents
+git clone https://github.com/cliu-debug/aquant-agent.git
+cd aquant-agent
 
 # 2️⃣ 安装依赖
 pip install -r requirements.txt

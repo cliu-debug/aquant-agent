@@ -92,7 +92,7 @@ const router = createRouter({
 })
 
 router.beforeEach((to) => {
-  document.title = `${to.meta.title || 'AStockAgents'} - AStockAgents`
+  document.title = `${to.meta.title || 'AQuant-Agent'} - AQuant-Agent`
 })
 
 export default router

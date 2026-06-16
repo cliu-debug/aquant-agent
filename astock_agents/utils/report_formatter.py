@@ -14,7 +14,7 @@ class ReportFormatter:
             return report.full_report
         
         lines = [
-            f"AStockAgents 分析报告",
+            f"AQuant-Agent 分析报告",
             f"股票: {report.stock_name} ({report.stock_code})",
             f"分析时间: {report.analysis_date.strftime('%Y-%m-%d %H:%M:%S')}",
             ""
